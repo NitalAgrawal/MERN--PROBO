@@ -1,0 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Warm Ivory */
+    --color-warm-ivory: 40 40% 96%;
+    
+    /* Soft Beige */
+    --color-soft-beige: 33 30% 90%;
+    
+    /* Deep Brown */
+    --color-deep-brown: 24 15% 20%;
+    
+    /* Warm Gray */
+    --color-warm-gray: 30 5% 55%;
+    
+    /* Sage Green */
+    --color-sage-green: 120 15% 75%;
+    
+    /* Dusty Rose */
+    --color-dusty-rose: 350 25% 80%;
+  }
+
+  body {
+    @apply bg-warm-ivory text-deep-brown font-sans antialiased selection:bg-dusty-rose/30;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif text-deep-brown tracking-tight;
+  }
+}
+
+@layer components {
+  /* Common UI overrides can go here */
+}
