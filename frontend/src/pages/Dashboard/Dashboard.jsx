@@ -1,11 +1,18 @@
 import { useNavigate } from 'react-router-dom';
 import StoryCard from '../../components/ui/StoryCard';
 import StoryEmptyState from '../../components/ui/StoryEmptyState';
-
-const mockStories = []; // Empty array to demonstrate the empty state
+import { mockStories } from '../../data/stories';
 
 const Dashboard = () => {
   const navigate = useNavigate();
+
+  const handleStoryClick = (story) => {
+    if (story.status === 'Completed' || story.status === 'Published') {
+      navigate(`/book/${story.id}`);
+    } else {
+      navigate(`/book-reveal/${story.id}`);
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto w-full">
@@ -27,7 +34,11 @@ const Dashboard = () => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
           {mockStories.map((story) => (
-            <StoryCard key={story.id} story={story} />
+            <StoryCard 
+              key={story.id} 
+              story={story} 
+              onClick={() => handleStoryClick(story)}
+            />
           ))}
         </div>
       )}

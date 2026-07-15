@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { MoreHorizontal, Lock, Globe, Users } from 'lucide-react';
 
-const StoryCard = ({ story }) => {
+const StoryCard = ({ story, onClick }) => {
   const {
     title,
     description,
@@ -30,6 +30,7 @@ const StoryCard = ({ story }) => {
       className="group flex flex-col cursor-pointer"
       whileHover={{ y: -4 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
+      onClick={onClick}
     >
       {/* Cover Image Container */}
       <div className="relative aspect-[3/4] w-full rounded-2xl overflow-hidden shadow-soft mb-4 bg-soft-beige">
@@ -40,8 +41,17 @@ const StoryCard = ({ story }) => {
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
           />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center border-2 border-dashed border-warm-gray/20 rounded-2xl">
-            <span className="font-serif text-2xl text-warm-gray/50 mb-2">{title}</span>
+          <div className={`w-full h-full flex flex-col items-center justify-end p-6 text-center bg-gradient-to-br ${story.coverGradient || 'from-soft-beige to-warm-ivory'} transition-transform duration-500 group-hover:scale-105 relative`}>
+            {/* Book spine decorative effect */}
+            <div className="absolute left-0 top-0 bottom-0 w-3 bg-black/10 blur-[1px] rounded-l-2xl" />
+            <div className="absolute left-3 top-0 bottom-0 w-[1px] bg-white/20" />
+            
+            <div className="mb-8 relative z-10 px-2">
+              <span className="font-serif text-lg font-bold text-deep-brown tracking-tight leading-snug drop-shadow-sm block">{title}</span>
+              {story.subtitle && <span className="text-[10px] text-deep-brown/65 mt-2 block italic line-clamp-2">{story.subtitle}</span>}
+            </div>
+            
+            <span className="text-[10px] uppercase tracking-widest text-deep-brown/40 font-semibold mb-2 relative z-10">StoryNest</span>
           </div>
         )}
 
