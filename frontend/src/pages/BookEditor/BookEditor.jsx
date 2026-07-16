@@ -1,130 +1,289 @@
-import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Sparkles, Eye, Save, CornerUpLeft, BookOpen } from 'lucide-react';
-import { mockStories } from '../../data/stories';
+import { useState, useRef, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 
+import { mockStories } from '../../data/stories';
+import EditorHeader from './components/EditorHeader';
+import LeftSidebar from './components/LeftSidebar';
+import RightSidebar from './components/RightSidebar';
+import FloatingToolbar from './components/FloatingToolbar';
+import ChapterPage from './components/ChapterPage';
+import VersionHistoryDrawer from './components/VersionHistoryDrawer';
+
+// ── Reflection page (non-chapter) ───────────────────────────────────────────
+const ReflectionPage = ({ reflection }) => (
+  <motion.article
+    initial={{ opacity: 0, y: 16 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.4, ease: 'easeOut' }}
+    className="editor-page rounded-2xl mb-10 overflow-hidden"
+  >
+    <div className="flex justify-between items-center px-10 md:px-16 pt-6 pb-3 text-[10px] text-warm-gray/40 uppercase tracking-widest select-none font-semibold border-b border-warm-gray/5">
+      <span>StoryNest</span>
+      <span>Reflection</span>
+    </div>
+
+    <div className="px-10 md:px-20 py-12 md:py-16">
+      <div className="mb-10 text-center">
+        <span className="text-[10px] uppercase tracking-[0.25em] text-warm-gray/50 font-bold block mb-3 select-none">
+          Conclusion
+        </span>
+        <h2
+          contentEditable
+          suppressContentEditableWarning
+          className="font-serif text-3xl md:text-4xl font-bold text-deep-brown leading-tight outline-none"
+          dangerouslySetInnerHTML={{ __html: reflection?.title || 'Final Reflection' }}
+        />
+        <div className="w-10 h-[1.5px] bg-warm-gray/20 mx-auto mt-5" />
+      </div>
+
+      <div className="space-y-6 text-[#3d3830] text-base md:text-lg leading-[1.85] text-justify">
+        {(reflection?.content || []).map((para, idx) => (
+          <p
+            key={idx}
+            contentEditable
+            suppressContentEditableWarning
+            data-placeholder="Write your reflection…"
+            className="outline-none transition-all rounded-sm px-1 -mx-1 focus:bg-soft-beige/20"
+            dangerouslySetInnerHTML={{ __html: para }}
+          />
+        ))}
+      </div>
+
+      {/* Closing ornament */}
+      <div className="flex justify-center pt-12">
+        <div className="flex items-center gap-3 text-warm-gray/25 select-none">
+          <div className="w-8 h-[1px] bg-current" />
+          <span className="text-lg">✦</span>
+          <div className="w-8 h-[1px] bg-current" />
+        </div>
+      </div>
+    </div>
+
+    <div className="flex justify-center items-center px-10 md:px-16 pb-6 pt-3 text-[10px] text-warm-gray/30 select-none border-t border-warm-gray/5">
+      <span>— Fin —</span>
+    </div>
+  </motion.article>
+);
+
+// ── Main BookEditor ──────────────────────────────────────────────────────────
 const BookEditor = () => {
   const { storyId } = useParams();
-  const navigate = useNavigate();
 
-  // Find active story
-  const story = mockStories.find(s => s.id === storyId) || mockStories[0];
+  // Load from mock data layer — deeply clone so state edits don't mutate source
+  const sourceStory = mockStories.find(s => s.id === storyId) || mockStories[0];
+  const [chapters, setChapters] = useState(() =>
+    (sourceStory.book?.chapters || []).map(ch => ({ ...ch }))
+  );
+  const [activeChapterId, setActiveChapterId] = useState(
+    sourceStory.book?.chapters?.[0]?.id || 'reflection'
+  );
+  const [collapsedChapters, setCollapsedChapters] = useState(new Set());
+  const [aiPanelOpen, setAiPanelOpen] = useState(true);
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
+
+  // The editable area ref — FloatingToolbar scopes selection checks to this
+  const editorAreaRef = useRef(null);
+
+  // ── Chapter management ───────────────────────────────────────────────────
+  const handleSelectChapter = useCallback((id) => {
+    setActiveChapterId(id);
+    // Scroll to chapter page
+    setTimeout(() => {
+      const el = document.getElementById(`chapter-${id}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  }, []);
+
+  const handleRenameChapter = useCallback((id, newTitle) => {
+    setChapters(prev =>
+      prev.map(ch => ch.id === id ? { ...ch, title: newTitle } : ch)
+    );
+  }, []);
+
+  const handleDeleteChapter = useCallback((id) => {
+    setChapters(prev => {
+      const next = prev.filter(ch => ch.id !== id);
+      if (activeChapterId === id) {
+        setActiveChapterId(next[0]?.id || 'reflection');
+      }
+      return next;
+    });
+  }, [activeChapterId]);
+
+  const handleDuplicateChapter = useCallback((id) => {
+    setChapters(prev => {
+      const idx = prev.findIndex(ch => ch.id === id);
+      if (idx === -1) return prev;
+      const original = prev[idx];
+      const copy = {
+        ...original,
+        id: `${original.id}-copy-${Date.now()}`,
+        title: `${original.title} (Copy)`,
+      };
+      const next = [...prev];
+      next.splice(idx + 1, 0, copy);
+      return next;
+    });
+  }, []);
+
+  const handleToggleCollapse = useCallback((id) => {
+    setCollapsedChapters(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleMoveChapter = useCallback((dragId, overId) => {
+    setChapters(prev => {
+      const next = [...prev];
+      const fromIdx = next.findIndex(ch => ch.id === dragId);
+      const toIdx = next.findIndex(ch => ch.id === overId);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return next;
+    });
+  }, []);
+
+  const handleAddChapter = useCallback(() => {
+    const newId = `ch-new-${Date.now()}`;
+    const newChapter = {
+      id: newId,
+      title: 'New Chapter',
+      content: ['Begin writing your new chapter here…'],
+      photo: null,
+      pullQuote: '',
+    };
+    setChapters(prev => [...prev, newChapter]);
+    setActiveChapterId(newId);
+    setTimeout(() => {
+      const el = document.getElementById(`chapter-${newId}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+  }, []);
+
+  // Compute the page number for a chapter
+  const getPageNumber = (idx) => 5 + idx * 2;
 
   return (
-    <div className="min-h-screen bg-warm-ivory text-deep-brown flex flex-col relative overflow-hidden">
-      {/* Ambient background blur */}
-      <div className="absolute w-[600px] h-[600px] rounded-full bg-dusty-rose/5 blur-3xl top-[-200px] left-[-200px] pointer-events-none" />
-      <div className="absolute w-[500px] h-[500px] rounded-full bg-sage-green/5 blur-3xl bottom-[-200px] right-[-200px] pointer-events-none" />
+    <div className="h-screen flex flex-col overflow-hidden bg-[#f0ede7]">
 
-      {/* Editor Header Bar */}
-      <header className="h-16 border-b border-warm-gray/10 bg-white/70 backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-10">
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={() => navigate(`/book/${story.id}`)}
-            className="flex items-center gap-2 text-sm text-warm-gray hover:text-deep-brown transition-colors group"
-          >
-            <ArrowLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" />
-            <span>Back to Preview</span>
-          </button>
-          <span className="text-warm-gray/40">|</span>
-          <span className="text-xs font-semibold uppercase tracking-widest text-warm-gray">Book Editor Interface</span>
-        </div>
+      {/* ── Top Header ─── */}
+      <EditorHeader
+        story={sourceStory}
+        onVersionHistoryOpen={() => setVersionHistoryOpen(true)}
+      />
 
-        {/* Action icons (disabled placeholders) */}
-        <div className="flex items-center gap-2 opacity-50 select-none">
-          <button disabled className="p-2 rounded-full hover:bg-soft-beige/50 text-warm-gray flex items-center gap-1.5 text-xs font-medium cursor-not-allowed">
-            <Save size={14} /> Save Draft
-          </button>
-          <button disabled className="bg-deep-brown text-warm-ivory px-4 py-1.5 rounded-full text-xs font-medium cursor-not-allowed flex items-center gap-1">
-            <Sparkles size={12} /> Generate Edits
-          </button>
-        </div>
-      </header>
+      {/* ── Three-panel body ─── */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
 
-      {/* Editor Layout Main Content */}
-      <main className="flex-1 max-w-5xl mx-auto w-full p-6 md:p-12 flex flex-col md:flex-row gap-8 relative z-10">
-        
-        {/* Left pane: mini info card */}
-        <div className="w-full md:w-80 shrink-0 space-y-6">
-          <div className="bg-white border border-warm-gray/10 rounded-2xl p-6 shadow-soft flex flex-col items-center text-center">
-            {/* Book Cover gradient */}
-            <div className={`w-32 aspect-[3/4] rounded-xl bg-gradient-to-br ${story.coverGradient} shadow-md flex flex-col items-center justify-end p-4 relative overflow-hidden mb-4 select-none`}>
-              <div className="absolute left-0 top-0 bottom-0 w-2 bg-black/10 blur-[0.5px]" />
-              <BookOpen size={24} className="text-deep-brown/25 mb-4" strokeWidth={1} />
-            </div>
-            
-            <h2 className="font-serif text-lg font-bold text-deep-brown leading-tight">{story.title}</h2>
-            <p className="text-xs text-warm-gray italic mt-1">{story.subtitle}</p>
-            
-            <div className="w-full border-t border-warm-gray/10 my-4 pt-4 text-left space-y-2.5">
-              <div className="flex justify-between text-xs">
-                <span className="text-warm-gray">Subject:</span>
-                <span className="font-medium text-deep-brown">{story.subject}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-warm-gray">Relationship:</span>
-                <span className="font-medium text-deep-brown">{story.relationship}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-warm-gray">Status:</span>
-                <span className="text-dusty-rose font-semibold">{story.status}</span>
-              </div>
-            </div>
-            
-            <button 
-              onClick={() => navigate(`/book/${story.id}`)}
-              className="w-full bg-soft-beige hover:bg-soft-beige/85 text-deep-brown text-sm font-medium py-2 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+        {/* LEFT SIDEBAR */}
+        <AnimatePresence initial={false}>
+          {leftSidebarOpen && (
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: 256 }}
+              exit={{ width: 0 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="overflow-hidden shrink-0 h-full"
             >
-              <Eye size={15} /> Preview Book
-            </button>
-          </div>
-        </div>
+              <LeftSidebar
+                story={sourceStory}
+                chapters={chapters}
+                activeChapterId={activeChapterId}
+                collapsedChapters={collapsedChapters}
+                onSelectChapter={handleSelectChapter}
+                onRenameChapter={handleRenameChapter}
+                onDeleteChapter={handleDeleteChapter}
+                onDuplicateChapter={handleDuplicateChapter}
+                onToggleCollapse={handleToggleCollapse}
+                onMoveChapter={handleMoveChapter}
+                onAddChapter={handleAddChapter}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* Right pane: Interactive Coming Soon Interface */}
-        <div className="flex-1 bg-white border border-warm-gray/10 rounded-2xl p-8 md:p-12 shadow-soft flex flex-col justify-center items-center text-center">
-          <div className="w-16 h-16 bg-[#faf8f4] border border-warm-gray/10 rounded-full flex items-center justify-center mb-6 shadow-sm">
-            <Sparkles size={28} className="text-dusty-rose" />
-          </div>
+        {/* Toggle left sidebar tab */}
+        <button
+          onClick={() => setLeftSidebarOpen(o => !o)}
+          className={`absolute left-0 top-1/2 -translate-y-1/2 z-30 bg-white border border-l-0 border-warm-gray/10 rounded-r-xl py-5 px-1.5 text-warm-gray/40 hover:text-warm-gray transition-colors shadow-sm ${
+            leftSidebarOpen ? 'translate-x-64' : 'translate-x-0'
+          } hidden lg:flex flex-col items-center transition-transform duration-300`}
+          title={leftSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
+          <div className="w-1 h-8 rounded-full bg-current opacity-50" />
+        </button>
 
-          <h1 className="font-serif text-3xl font-bold text-deep-brown mb-4">
-            AI Book Editor
-          </h1>
-          <p className="text-xs font-semibold uppercase tracking-widest text-dusty-rose mb-6">
-            ✦ Coming in Phase 3 ✦
-          </p>
+        {/* CENTER — Editable Book Pages */}
+        <main
+          ref={editorAreaRef}
+          className="flex-1 overflow-y-auto px-4 md:px-8 py-10 min-w-0"
+          style={{ background: 'linear-gradient(to bottom, #ede9e2 0%, #e8e4dc 100%)' }}
+        >
+          <div className="max-w-3xl mx-auto">
 
-          <p className="text-warm-gray text-base leading-relaxed max-w-lg mb-8">
-            The Book Editor will enable you to customize chapters, rewrite paragraphs using tailored AI prompts, insert specific memories, and regenerate beautiful layout imagery.
-          </p>
+            {/* Ambient background glow */}
+            <div className="pointer-events-none fixed top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-dusty-rose/5 blur-3xl rounded-full" />
 
-          {/* Grid of future tools */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md mb-8 text-left">
-            {[
-              { title: 'Chapter Customizer', desc: 'Add, delete, or rearrange chapters and text panels.' },
-              { title: 'AI Refiner', desc: 'Change reading tone (e.g. nostalgic, humorous, poetic).' },
-              { title: 'Memory Integration', desc: 'Inject new details or diary records into existing paragraphs.' },
-              { title: 'Layout Templates', desc: 'Select alternative margins, drop cap variants, and spacing grids.' }
-            ].map(({ title, desc }) => (
-              <div key={title} className="p-4 rounded-xl border border-warm-gray/5 bg-[#faf8f4]/50 flex items-start gap-2.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-dusty-rose mt-1.5 shrink-0" />
-                <div>
-                  <h4 className="text-xs font-bold text-deep-brown">{title}</h4>
-                  <p className="text-[10px] text-warm-gray mt-0.5 leading-normal">{desc}</p>
-                </div>
+            {/* Chapters */}
+            {chapters.map((chapter, idx) => (
+              <div
+                key={chapter.id}
+                id={`chapter-${chapter.id}`}
+                onClick={() => setActiveChapterId(chapter.id)}
+                className={`transition-all duration-200 ${
+                  activeChapterId === chapter.id
+                    ? 'ring-2 ring-dusty-rose/20 ring-offset-4 ring-offset-transparent rounded-2xl'
+                    : ''
+                }`}
+              >
+                <ChapterPage
+                  chapter={chapter}
+                  pageNumber={getPageNumber(idx)}
+                  isCollapsed={collapsedChapters.has(chapter.id)}
+                />
               </div>
             ))}
-          </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm justify-center">
-            <button
-              onClick={() => navigate('/dashboard')}
-              className="bg-deep-brown hover:bg-deep-brown/95 text-warm-ivory px-6 py-2.5 rounded-full text-sm font-medium transition-colors flex items-center justify-center gap-1.5 shadow-soft"
+            {/* Reflection page */}
+            <div
+              id="chapter-reflection"
+              onClick={() => setActiveChapterId('reflection')}
+              className={`transition-all duration-200 ${
+                activeChapterId === 'reflection'
+                  ? 'ring-2 ring-dusty-rose/20 ring-offset-4 ring-offset-transparent rounded-2xl'
+                  : ''
+              }`}
             >
-              <CornerUpLeft size={15} /> Return to Stories
-            </button>
-          </div>
-        </div>
+              <ReflectionPage reflection={sourceStory.book?.reflection} />
+            </div>
 
-      </main>
+            {/* Bottom spacer */}
+            <div className="h-24" />
+          </div>
+        </main>
+
+        {/* RIGHT SIDEBAR — AI Assistant */}
+        <RightSidebar
+          isOpen={aiPanelOpen}
+          onToggle={() => setAiPanelOpen(o => !o)}
+        />
+
+      </div>
+
+      {/* Floating rich-text toolbar — positioned globally via fixed CSS */}
+      <FloatingToolbar targetRef={editorAreaRef} />
+
+      {/* Version History Drawer */}
+      <VersionHistoryDrawer
+        isOpen={versionHistoryOpen}
+        onClose={() => setVersionHistoryOpen(false)}
+      />
 
     </div>
   );

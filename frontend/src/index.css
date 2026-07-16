@@ -35,5 +35,32 @@
 }
 
 @layer components {
-  /* Common UI overrides can go here */
+  /* ── Book Editor ── */
+  [contenteditable]:focus {
+    outline: none;
+  }
+  [contenteditable]:empty:before {
+    content: attr(data-placeholder);
+    @apply text-warm-gray/40 pointer-events-none select-none;
+  }
+  .drag-handle {
+    cursor: grab;
+  }
+  .drag-handle:active {
+    cursor: grabbing;
+  }
+  .editor-page {
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05), 0 0 0 1px rgba(0,0,0,0.04);
+  }
+  /* Highlight class applied by toolbar */
+  .text-highlight {
+    background-color: hsl(40 70% 88%);
+    border-radius: 2px;
+    padding: 0 2px;
+  }
+  /* Pull-quote styling */
+  .pull-quote-block {
+    @apply border-l-4 border-dusty-rose pl-5 py-2 my-6 italic font-serif text-xl text-deep-brown/80 leading-relaxed bg-[#fdfbf7] pr-4 rounded-r-lg;
+  }
 }
