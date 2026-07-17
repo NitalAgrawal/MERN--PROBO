@@ -5,12 +5,17 @@ import {
   ArrowLeft, Pencil, BookOpen, Sparkles, BookMarked, Printer, Download,
   Share2, Image as ImageIcon, Menu, X, ChevronRight, Eye
 } from 'lucide-react';
-import { mockStories } from '../../data/stories';
+import { getStory } from '../../services/storyService';
 
 const BookPreview = () => {
   const { storyId } = useParams();
   const navigate = useNavigate();
   
+  // State for dynamic story loading
+  const [story, setStory] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
   // Sidebar open/collapsed state
   const [sidebarOpen, setSidebarOpen] = useState(true);
   // Active page ID for TOC highlighting
@@ -22,9 +27,27 @@ const BookPreview = () => {
   const containerRef = useRef(null);
   const sectionsRef = useRef({});
 
-  // Find the requested story
-  const story = mockStories.find(s => s.id === storyId) || mockStories[0];
-  const { book } = story;
+  useEffect(() => {
+    const fetchStory = async () => {
+      try {
+        const response = await getStory(storyId);
+        const fetchedStory = response.data.story;
+        setStory(fetchedStory);
+        if (!fetchedStory.generatedBook) {
+          // If no generated book yet, redirect to the reveal/compilation page
+          navigate(`/book-reveal/${storyId}`);
+        }
+      } catch (err) {
+        console.error('Failed to load book preview:', err);
+        setError('Failed to load book preview. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchStory();
+  }, [storyId, navigate]);
+
+  const book = story?.generatedBook;
 
   // Handle scroll progress and update active section
   useEffect(() => {
@@ -45,13 +68,12 @@ const BookPreview = () => {
 
       // 2. Detect which section is active
       let currentSection = 'cover';
-      const sectionIds = ['cover', 'dedication', 'toc', ...(book?.chapters?.map(c => c.id) || []), 'reflection'];
+      const sectionIds = ['cover', 'dedication', 'toc', ...(book?.chapters?.map(c => c.id || c._id) || []), 'reflection'];
       
       for (const id of sectionIds) {
         const el = sectionsRef.current[id];
         if (el) {
           const rect = el.getBoundingClientRect();
-          // If the element is near or above the center of the viewport
           if (rect.top <= clientHeight / 2) {
             currentSection = id;
           }
@@ -83,6 +105,28 @@ const BookPreview = () => {
       setActiveSection(id);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#f7f4ee] flex justify-center items-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-dusty-rose" />
+      </div>
+    );
+  }
+
+  if (error || !story || !book) {
+    return (
+      <div className="min-h-screen bg-[#f7f4ee] flex flex-col justify-center items-center gap-4">
+        <p className="text-red-500 font-semibold">{error || 'Book preview is not available.'}</p>
+        <button 
+          onClick={() => navigate('/dashboard')} 
+          className="bg-deep-brown text-warm-ivory px-6 py-2 rounded-full text-sm font-semibold hover:bg-deep-brown/95 transition-colors"
+        >
+          Back to Stories
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f7f4ee] text-deep-brown flex overflow-hidden relative">
@@ -123,14 +167,14 @@ const BookPreview = () => {
                   <BookOpen size={18} className="text-deep-brown/25" strokeWidth={1.5} />
                 </div>
                 <div>
-                  <h3 className="font-serif text-base font-bold leading-tight line-clamp-2">{story.title}</h3>
+                  <h3 className="font-serif text-base font-bold leading-tight line-clamp-2">{story.title || 'Untitled Story'}</h3>
                   <p className="text-xs text-warm-gray mt-1">Created by You</p>
                   <div className="flex items-center gap-1.5 mt-2">
                     <span className="text-[10px] bg-soft-beige text-warm-gray px-2 py-0.5 rounded-full font-medium">
                       {story.status}
                     </span>
                     <span className="text-[10px] text-warm-gray font-serif italic">
-                      {book?.readingTime || '10 min'} read
+                      {book?.readingTime || '5 min'} read
                     </span>
                   </div>
                 </div>
@@ -158,7 +202,7 @@ const BookPreview = () => {
                     { id: 'cover', label: 'Cover Page' },
                     { id: 'dedication', label: 'Dedication' },
                     { id: 'toc', label: 'Table of Contents' },
-                    ...(book?.chapters?.map(ch => ({ id: ch.id, label: ch.title })) || []),
+                    ...(book?.chapters?.map((ch, idx) => ({ id: ch.id || ch._id || `ch-${idx}`, label: ch.title })) || []),
                     { id: 'reflection', label: 'Final Reflection' }
                   ].map((item) => {
                     const isActive = activeSection === item.id;
@@ -183,7 +227,7 @@ const BookPreview = () => {
               {/* Primary Actions */}
               <div className="pt-4 border-t border-warm-gray/10 space-y-2">
                 <button
-                  onClick={() => navigate(`/book-editor/${story.id}`)}
+                  onClick={() => navigate(`/book-editor/${story._id}`)}
                   className="w-full flex items-center justify-center gap-2 bg-deep-brown text-warm-ivory py-2.5 rounded-full hover:bg-deep-brown/90 transition-colors shadow-md text-sm font-medium"
                 >
                   <Pencil size={15} />
@@ -239,7 +283,7 @@ const BookPreview = () => {
           
           {/* Header Bar Indicator */}
           <div className="w-full flex justify-between items-center text-xs text-warm-gray border-b border-warm-gray/10 pb-3 mb-10 select-none">
-            <span className="font-serif italic font-medium">{story.title}</span>
+            <span className="font-serif italic font-medium">{story.title || 'Untitled Story'}</span>
             <span className="uppercase tracking-widest font-semibold text-[10px]">StoryNest Preview</span>
           </div>
 
@@ -249,26 +293,25 @@ const BookPreview = () => {
             ref={el => sectionsRef.current['cover'] = el}
             className="w-full aspect-[3/4.2] rounded-2xl bg-gradient-to-br from-white to-[#faf8f4] border border-warm-gray/10 shadow-soft p-12 md:p-16 mb-16 flex flex-col justify-between relative overflow-hidden select-none"
           >
-            {/* Elegant Book Spine Line */}
             <div className="absolute left-0 top-0 bottom-0 w-4 bg-gradient-to-r from-black/5 via-black/[0.01] to-transparent blur-[1px]" />
             <div className="absolute left-4 top-0 bottom-0 w-[1px] bg-warm-gray/10" />
 
             <div className="text-center mt-8 relative z-10">
               <span className="text-[10px] uppercase tracking-[0.25em] text-warm-gray/60 font-semibold block mb-12">StoryNest Biography</span>
               
-              {/* Cover Gradient Graphic */}
               <div className={`w-40 h-40 rounded-full mx-auto mb-12 bg-gradient-to-br ${story.coverGradient} shadow-inner flex items-center justify-center relative`}>
                 <BookOpen size={48} className="text-deep-brown/15" strokeWidth={1} />
-                {/* Micro animation overlay */}
                 <div className="absolute inset-0 rounded-full bg-white/10 mix-blend-overlay" />
               </div>
 
               <h1 className="font-serif text-3xl md:text-5xl font-bold leading-tight tracking-tight text-deep-brown mt-4 mb-4">
-                {story.title}
+                {story.title || 'Untitled Story'}
               </h1>
-              <p className="font-serif text-warm-gray italic text-sm md:text-base max-w-md mx-auto leading-relaxed">
-                {story.subtitle}
-              </p>
+              {story.subtitle && (
+                <p className="font-serif text-warm-gray italic text-sm md:text-base max-w-md mx-auto leading-relaxed">
+                  {story.subtitle}
+                </p>
+              )}
             </div>
 
             <div className="text-center mb-4 relative z-10">
@@ -284,7 +327,6 @@ const BookPreview = () => {
             ref={el => sectionsRef.current['dedication'] = el}
             className="w-full min-h-[50vh] rounded-2xl bg-white border border-warm-gray/10 shadow-soft p-12 md:p-16 mb-16 flex flex-col justify-center items-center relative overflow-hidden"
           >
-            {/* Spine Line */}
             <div className="absolute left-0 top-0 bottom-0 w-4 bg-gradient-to-r from-black/5 via-black/[0.01] to-transparent blur-[1px]" />
             <div className="absolute left-4 top-0 bottom-0 w-[1px] bg-warm-gray/10" />
 
@@ -301,7 +343,6 @@ const BookPreview = () => {
             ref={el => sectionsRef.current['toc'] = el}
             className="w-full min-h-[60vh] rounded-2xl bg-white border border-warm-gray/10 shadow-soft p-12 md:p-16 mb-16 flex flex-col justify-between relative overflow-hidden"
           >
-            {/* Spine Line */}
             <div className="absolute left-0 top-0 bottom-0 w-4 bg-gradient-to-r from-black/5 via-black/[0.01] to-transparent blur-[1px]" />
             <div className="absolute left-4 top-0 bottom-0 w-[1px] bg-warm-gray/10" />
 
@@ -313,7 +354,7 @@ const BookPreview = () => {
                 {[
                   { id: 'cover', label: 'Cover Page', pageNum: '1' },
                   { id: 'dedication', label: 'Dedication', pageNum: '3' },
-                  ...(book?.chapters?.map((ch, index) => ({ id: ch.id, label: ch.title, pageNum: `${5 + index * 2}` })) || []),
+                  ...(book?.chapters?.map((ch, index) => ({ id: ch.id || ch._id || `ch-${index}`, label: ch.title, pageNum: `${5 + index * 2}` })) || []),
                   { id: 'reflection', label: 'Final Reflection', pageNum: `${5 + (book?.chapters?.length || 0) * 2}` }
                 ].map((item) => (
                   <button
@@ -337,19 +378,18 @@ const BookPreview = () => {
           {/* ─── DYNAMIC CHAPTERS ─── */}
           {book?.chapters?.map((chapter, index) => {
             const pageNum = 5 + index * 2;
+            const chId = chapter.id || chapter._id || `ch-${index}`;
             return (
               <section
-                key={chapter.id}
-                id={chapter.id}
-                ref={el => sectionsRef.current[chapter.id] = el}
+                key={chId}
+                id={chId}
+                ref={el => sectionsRef.current[chId] = el}
                 className="w-full rounded-2xl bg-white border border-warm-gray/10 shadow-soft p-12 md:p-16 mb-16 flex flex-col justify-between relative overflow-hidden"
               >
-                {/* Spine Line */}
                 <div className="absolute left-0 top-0 bottom-0 w-4 bg-gradient-to-r from-black/5 via-black/[0.01] to-transparent blur-[1px]" />
                 <div className="absolute left-4 top-0 bottom-0 w-[1px] bg-warm-gray/10" />
 
                 <div className="space-y-8">
-                  {/* Chapter Header */}
                   <div className="text-center mb-8">
                     <span className="text-[10px] uppercase tracking-widest text-warm-gray/50 font-bold block mb-2 select-none">Section {index + 1}</span>
                     <h2 className="font-serif text-3xl md:text-4xl font-bold text-deep-brown leading-tight">
@@ -358,11 +398,9 @@ const BookPreview = () => {
                     <div className="w-12 h-[1px] bg-warm-gray/20 mx-auto mt-4" />
                   </div>
 
-                  {/* Chapter content rendering */}
                   <div className="space-y-6 text-[#3d3830] font-sans text-base md:text-lg leading-relaxed text-justify">
                     {chapter.content?.map((paragraph, pIdx) => {
                       if (pIdx === 0) {
-                        // Drop Cap first paragraph
                         const firstChar = paragraph.charAt(0);
                         const restOfText = paragraph.slice(1);
                         return (
@@ -378,7 +416,6 @@ const BookPreview = () => {
                     })}
                   </div>
 
-                  {/* Photo Placeholder */}
                   {chapter.photo && (
                     <div className="my-8">
                       <div 
@@ -386,7 +423,6 @@ const BookPreview = () => {
                           chapter.photo.aspect === 'video' ? 'aspect-video' : chapter.photo.aspect === 'portrait' ? 'aspect-[3/4]' : 'aspect-square'
                         } rounded-xl ${chapter.photo.placeholderStyle || 'bg-soft-beige'} border border-warm-gray/10 flex flex-col items-center justify-center p-8 relative overflow-hidden shadow-inner group`}
                       >
-                        {/* Shimmer effect background */}
                         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full animate-[shimmer_2.5s_infinite]" />
                         
                         <ImageIcon size={36} className="text-warm-gray/40 mb-3 group-hover:scale-105 transition-transform" />
@@ -394,7 +430,6 @@ const BookPreview = () => {
                           Illustration Block Placeholder
                         </span>
                         
-                        {/* Miniature layout decoration */}
                         <div className="absolute bottom-4 right-4 flex items-center gap-1.5 text-[10px] text-warm-gray/40 bg-white/40 backdrop-blur-sm px-2 py-1 rounded-full">
                           <Eye size={10} />
                           <span>AI Asset Preview</span>
@@ -408,7 +443,6 @@ const BookPreview = () => {
                     </div>
                   )}
 
-                  {/* Pull Quote */}
                   {chapter.pullQuote && (
                     <blockquote className="my-8 pl-6 border-l-4 border-dusty-rose py-2 italic font-serif text-lg md:text-xl text-deep-brown/85 leading-relaxed bg-[#fdfbf7] pr-4 rounded-r-md">
                       “{chapter.pullQuote}”
@@ -430,7 +464,6 @@ const BookPreview = () => {
             ref={el => sectionsRef.current['reflection'] = el}
             className="w-full rounded-2xl bg-white border border-warm-gray/10 shadow-soft p-12 md:p-16 mb-24 flex flex-col justify-between relative overflow-hidden"
           >
-            {/* Spine Line */}
             <div className="absolute left-0 top-0 bottom-0 w-4 bg-gradient-to-r from-black/5 via-black/[0.01] to-transparent blur-[1px]" />
             <div className="absolute left-4 top-0 bottom-0 w-[1px] bg-warm-gray/10" />
 
@@ -449,7 +482,6 @@ const BookPreview = () => {
                 ))}
               </div>
 
-              {/* End Decorative Icon */}
               <div className="flex justify-center pt-8">
                 <div className="w-3 h-3 rounded-full bg-dusty-rose/30 flex items-center justify-center">
                   <div className="w-1.5 h-1.5 rounded-full bg-dusty-rose" />

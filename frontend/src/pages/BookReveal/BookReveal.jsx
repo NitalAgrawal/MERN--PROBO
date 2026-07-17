@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Check, BookOpen, Clock, Hash, BookMarked, Pencil, ChevronRight
 } from 'lucide-react';
-import { mockStories } from '../../data/stories';
+import { getStory, updateStory } from '../../services/storyService';
+import { getMemories } from '../../services/memoryService';
 
 // ─── Processing stages ────────────────────────────────────────────────────────
 const stages = [
@@ -16,14 +17,11 @@ const stages = [
   'Designing your book',
 ];
 
-// Duration each stage stays "active" before the next one checks off (ms)
 const STAGE_INTERVAL = 900;
-// How long to wait after all stages complete before revealing
 const REVEAL_DELAY = 800;
 
 // ─── Single animated stage row ────────────────────────────────────────────────
 const StageRow = ({ label, state }) => {
-  // state: 'pending' | 'active' | 'done'
   return (
     <motion.div
       initial={{ opacity: 0, x: -12 }}
@@ -31,7 +29,6 @@ const StageRow = ({ label, state }) => {
       transition={{ duration: 0.4, ease: 'easeOut' }}
       className="flex items-center gap-4"
     >
-      {/* Icon area */}
       <div className="w-8 h-8 shrink-0 flex items-center justify-center">
         {state === 'done' && (
           <motion.div
@@ -57,7 +54,6 @@ const StageRow = ({ label, state }) => {
         )}
       </div>
 
-      {/* Label */}
       <span
         className={`font-serif text-xl transition-all duration-300 ${
           state === 'done'
@@ -73,7 +69,7 @@ const StageRow = ({ label, state }) => {
   );
 };
 
-// ─── Phase 1 — Processing ─────────────────────────────────────────────────────
+// ─── Processing screen view ───────────────────────────────────────────────────
 const ProcessingScreen = ({ currentStage }) => (
   <motion.div
     key="processing"
@@ -83,7 +79,6 @@ const ProcessingScreen = ({ currentStage }) => (
     transition={{ duration: 0.6 }}
     className="flex flex-col items-center justify-center min-h-screen px-6 text-center"
   >
-    {/* Ambient glow blob */}
     <motion.div
       animate={{ scale: [1, 1.08, 1], opacity: [0.4, 0.6, 0.4] }}
       transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
@@ -91,7 +86,6 @@ const ProcessingScreen = ({ currentStage }) => (
     />
 
     <div className="relative z-10 max-w-lg w-full">
-      {/* Heading */}
       <motion.p
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -111,7 +105,6 @@ const ProcessingScreen = ({ currentStage }) => (
         <span className="italic text-dusty-rose">beautiful story</span>.
       </motion.h1>
 
-      {/* Stage list */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -125,7 +118,6 @@ const ProcessingScreen = ({ currentStage }) => (
         })}
       </motion.div>
 
-      {/* Fine print */}
       <motion.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -138,10 +130,10 @@ const ProcessingScreen = ({ currentStage }) => (
   </motion.div>
 );
 
+// ─── Revealed book view ────────────────────────────────────────────────────────
 const BookRevealScreen = ({ book, navigate }) => {
-  const chapterCount = book.book?.chapters?.length || 0;
-  const memoryCount = chapterCount * 3; // Mocking 3 memories per chapter
-  const readingTime = book.book?.readingTime || '15 min';
+  const chapterCount = book.generatedBook?.chapters?.length || 0;
+  const readingTime = book.generatedBook?.readingTime || '5 min';
 
   return (
     <motion.div
@@ -152,15 +144,13 @@ const BookRevealScreen = ({ book, navigate }) => {
       transition={{ duration: 0.8 }}
       className="flex flex-col items-center justify-center min-h-screen px-6 py-16 text-center"
     >
-      {/* Ambient glow */}
       <motion.div
         animate={{ scale: [1, 1.1, 1], opacity: [0.3, 0.5, 0.3] }}
         transition={{ repeat: Infinity, duration: 5, ease: 'easeInOut' }}
         className="absolute w-[500px] h-[500px] rounded-full bg-dusty-rose/10 blur-3xl pointer-events-none"
       />
 
-      <div className="relative z-10 flex flex-col items-center max-w-xl w-full">
-        {/* Eyebrow */}
+      <div className="relative z-10 flex flex-col items-center max-w-xl w-full select-none">
         <motion.p
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -177,18 +167,13 @@ const BookRevealScreen = ({ book, navigate }) => {
           transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: 0.2 }}
           className="mb-12"
         >
-          {/* Outer shadow frame — gives a "book on table" feel */}
           <div className="relative">
-            {/* Spine shadow */}
             <div className="absolute -left-3 top-3 bottom-0 w-3 bg-deep-brown/20 rounded-l-sm blur-[2px]" />
-            {/* Page edges */}
             <div className="absolute -right-1 top-1 bottom-0 w-2 bg-white/60 rounded-r-sm" />
 
-            {/* Cover */}
             <div
-              className={`w-56 md:w-64 aspect-[3/4] rounded-2xl bg-gradient-to-br ${book.coverGradient || 'from-soft-beige to-warm-ivory'} shadow-2xl flex flex-col items-center justify-end p-6 overflow-hidden`}
+              className={`w-56 md:w-64 aspect-[3/4] rounded-2xl bg-gradient-to-br ${book.coverGradient || 'from-soft-beige to-warm-ivory'} shadow-2xl flex flex-col items-center justify-end p-6 overflow-hidden relative`}
             >
-              {/* Decorative inner pattern */}
               <motion.div
                 animate={{ rotate: [0, 3, 0, -3, 0] }}
                 transition={{ repeat: Infinity, duration: 8, ease: 'easeInOut' }}
@@ -197,11 +182,10 @@ const BookRevealScreen = ({ book, navigate }) => {
                 <BookOpen size={140} strokeWidth={0.5} className="text-deep-brown" />
               </motion.div>
 
-              {/* Cover text */}
               <div className="relative z-10 text-center">
-                <p className="text-xs font-semibold text-deep-brown/50 uppercase tracking-widest mb-2">StoryNest</p>
-                <h2 className="font-serif text-lg font-bold text-deep-brown leading-snug">
-                  {book.title}
+                <p className="text-[10px] font-semibold text-deep-brown/50 uppercase tracking-widest mb-2">StoryNest</p>
+                <h2 className="font-serif text-lg font-bold text-deep-brown leading-snug line-clamp-3 px-2">
+                  {book.title || 'Untitled Story'}
                 </h2>
               </div>
             </div>
@@ -216,11 +200,13 @@ const BookRevealScreen = ({ book, navigate }) => {
           className="mb-8"
         >
           <h1 className="font-serif text-3xl md:text-4xl font-bold text-deep-brown mb-3 leading-snug">
-            {book.title}
+            {book.title || 'Untitled Story'}
           </h1>
-          <p className="text-warm-gray text-base leading-relaxed max-w-md mx-auto italic">
-            {book.subtitle}
-          </p>
+          {book.subtitle && (
+            <p className="text-warm-gray text-base leading-relaxed max-w-md mx-auto italic">
+              {book.subtitle}
+            </p>
+          )}
         </motion.div>
 
         {/* Meta pills */}
@@ -231,8 +217,7 @@ const BookRevealScreen = ({ book, navigate }) => {
           className="flex flex-wrap items-center justify-center gap-3 mb-12"
         >
           {[
-            { icon: BookMarked, label: `${chapterCount} Chapters` },
-            { icon: Hash, label: `${memoryCount} Memories` },
+            { icon: BookMarked, label: `${chapterCount} Chapter${chapterCount !== 1 ? 's' : ''}` },
             { icon: Clock, label: `${readingTime} read` },
           ].map(({ icon: Icon, label }) => (
             <span
@@ -254,7 +239,7 @@ const BookRevealScreen = ({ book, navigate }) => {
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => navigate(`/book/${book.id}`)}
+            onClick={() => navigate(`/book/${book._id}`)}
             className="flex items-center justify-center gap-2.5 bg-deep-brown text-warm-ivory px-10 py-4 rounded-full hover:bg-deep-brown/90 transition-colors shadow-soft text-base font-medium group"
           >
             <BookOpen size={18} className="group-hover:animate-pulse" />
@@ -264,7 +249,7 @@ const BookRevealScreen = ({ book, navigate }) => {
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => navigate('/workspace')}
+            onClick={() => navigate(`/workspace/${book._id}`)}
             className="flex items-center justify-center gap-2.5 bg-white text-deep-brown border border-warm-gray/20 px-10 py-4 rounded-full hover:bg-soft-beige transition-colors text-base font-medium group"
           >
             <Pencil size={16} />
@@ -272,7 +257,6 @@ const BookRevealScreen = ({ book, navigate }) => {
           </motion.button>
         </motion.div>
 
-        {/* Fine print */}
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -286,20 +270,36 @@ const BookRevealScreen = ({ book, navigate }) => {
   );
 };
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Main Component ───────────────────────────────────────────────────────────
 const BookReveal = () => {
   const navigate = useNavigate();
   const { storyId } = useParams();
+  const [story, setStory] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [currentStage, setCurrentStage] = useState(0);
-  const [phase, setPhase] = useState('processing'); // 'processing' | 'reveal'
-
-  const activeStoryId = storyId || 'family-rose';
-  const story = mockStories.find(s => s.id === activeStoryId) || mockStories[0];
+  const [phase, setPhase] = useState('processing');
 
   useEffect(() => {
-    if (phase !== 'processing') return;
+    const fetchStory = async () => {
+      try {
+        const response = await getStory(storyId);
+        const fetchedStory = response.data.story;
+        setStory(fetchedStory);
+        if (fetchedStory.generatedBook) {
+          setPhase('reveal');
+        }
+      } catch (err) {
+        console.error('Failed to load story:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchStory();
+  }, [storyId]);
 
-    // Advance through stages
+  useEffect(() => {
+    if (phase !== 'processing' || !story || story.generatedBook) return;
+
     if (currentStage < stages.length) {
       const timer = setTimeout(
         () => setCurrentStage(s => s + 1),
@@ -308,10 +308,95 @@ const BookReveal = () => {
       return () => clearTimeout(timer);
     }
 
-    // All stages done → wait then reveal
-    const revealTimer = setTimeout(() => setPhase('reveal'), REVEAL_DELAY);
+    const compileAndSaveBook = async () => {
+      try {
+        // Fetch real memories of the story
+        const response = await getMemories(storyId);
+        const memories = response.data.memories || [];
+
+        // Build chapters from user's memories
+        const chapters = memories.map((m, index) => ({
+          title: m.title || `Chapter ${index + 1}: Memory`,
+          content: [m.content],
+          photo: m.photos && m.photos.length > 0 ? {
+            caption: m.location || '',
+            aspect: 'video',
+            placeholderStyle: 'bg-gradient-to-tr from-dusty-rose/20 to-soft-beige/40'
+          } : null,
+          pullQuote: m.content.length > 70 ? m.content.substring(0, 70) + '...' : m.content
+        }));
+
+        if (chapters.length === 0) {
+          chapters.push({
+            title: 'Introduction',
+            content: ['A blank canvas waiting for memories. Return to the canvas to write down details.'],
+            photo: null,
+            pullQuote: 'A blank canvas waiting for memories.'
+          });
+        }
+
+        const wordCount = memories.reduce((acc, m) => acc + (m.content || '').split(' ').length, 0);
+        const calculatedReadingTime = `${Math.max(1, Math.ceil(wordCount / 200))} min`;
+
+        const compiledBook = {
+          dedication: `Dedicated to ${story.subject || 'Nana Rose'} and those who hold the quiet moments close.`,
+          chapters,
+          reflection: {
+            title: 'Final Reflection',
+            content: [
+              'In the end, a person’s life is not measured by the grand gestures, but by the quiet echoes they leave behind.',
+              'The stories captured here are dynamic and live on in our hearts.'
+            ]
+          },
+          readingTime: calculatedReadingTime,
+          generatedAt: new Date(),
+          aiVersion: 'StoryNest Compile v1',
+          aiMetadata: {
+            model: 'local-compiler',
+            promptVersion: '1.0',
+            generationTime: 1200
+          }
+        };
+
+        // Save compilation back to database and update status to Ready
+        const updateResponse = await updateStory(storyId, {
+          generatedBook: compiledBook,
+          status: 'Ready'
+        });
+
+        setStory(updateResponse.data.story);
+        setPhase('reveal');
+      } catch (err) {
+        console.error('Failed to compile memories:', err);
+        setPhase('reveal');
+      }
+    };
+
+    const revealTimer = setTimeout(compileAndSaveBook, REVEAL_DELAY);
     return () => clearTimeout(revealTimer);
-  }, [currentStage, phase]);
+  }, [currentStage, phase, story, storyId]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-warm-ivory flex justify-center items-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-dusty-rose" />
+      </div>
+    );
+  }
+
+  if (!story) {
+    return (
+      <div className="min-h-screen bg-warm-ivory flex flex-col justify-center items-center gap-4">
+        <p className="text-red-500 font-semibold">Story not found.</p>
+        <button 
+          onClick={() => navigate('/dashboard')} 
+          className="bg-deep-brown text-warm-ivory px-6 py-2 rounded-full text-sm font-semibold hover:bg-deep-brown/95 transition-colors"
+        >
+          Back to Dashboard
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-warm-ivory relative overflow-hidden">

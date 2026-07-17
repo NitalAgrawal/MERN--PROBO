@@ -78,7 +78,7 @@ function App() {
             } 
           />
           <Route 
-            path="/workspace" 
+            path="/workspace/:storyId" 
             element={
               <ProtectedRoute>
                 <Workspace />

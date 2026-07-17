@@ -1,44 +1,118 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { PlusCircle, Sparkles } from 'lucide-react';
 import MemoryCard from './MemoryCard';
+import { getMemories, createMemory, deleteMemory, bulkReorderMemories } from '../../../../services/memoryService';
 
-// ─── ID generator ─────────────────────────────────────────────────────────────
-let idCounter = 1;
-const makeId = () => `memory-${idCounter++}`;
+// ─── Temp ID generator ────────────────────────────────────────────────────────
+let tempIdCounter = 1;
+const makeTempId = () => `temp-memory-${tempIdCounter++}`;
 
 // ─── Blank card factory ───────────────────────────────────────────────────────
 const blankCard = () => ({
-  id: makeId(),
+  id: makeTempId(),
   title: '',
   body: '',
   date: '',
   location: '',
   photos: [],
-  hasVoice: false,
+  voiceNote: '',
   saved: false,
 });
 
 // ─── MemoryCanvas ─────────────────────────────────────────────────────────────
-const MemoryCanvas = ({ onFinish }) => {
+const MemoryCanvas = ({ storyId, onFinish }) => {
   const navigate = useNavigate();
-  const [cards, setCards] = useState([blankCard()]);
+  const [cards, setCards] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Update a single card's data
+  // Load memories from backend on mount
+  useEffect(() => {
+    const fetchMemories = async () => {
+      try {
+        const response = await getMemories(storyId);
+        const backendMemories = response.data.memories || [];
+        if (backendMemories.length > 0) {
+          const mappedCards = backendMemories.map(m => ({
+            id: m._id,
+            title: m.title || '',
+            body: m.content || '',
+            date: m.date || '',
+            location: m.location || '',
+            photos: m.photos || [],
+            voiceNote: m.voiceNote || '',
+            saved: true
+          }));
+          setCards(mappedCards);
+        } else {
+          setCards([blankCard()]);
+        }
+      } catch (err) {
+        console.error('Failed to load memories:', err);
+        setCards([blankCard()]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchStoryMemories();
+
+    // Hoisted helper
+    async function fetchStoryMemories() {
+      await fetchMemories();
+    }
+  }, [storyId]);
+
+  // Update a single card's data in local state
   const updateCard = (id, data) =>
     setCards(prev => prev.map(c => (c.id === id ? data : c)));
 
-  // Mark card as saved
-  const saveCard = id =>
-    setCards(prev => prev.map(c => (c.id === id ? { ...c, saved: true } : c)));
+  // Save a memory card
+  const saveCard = async (id) => {
+    const card = cards.find(c => c.id === id);
+    if (!card) return;
+
+    if (id.startsWith('temp-')) {
+      try {
+        const response = await createMemory(storyId, {
+          title: card.title || undefined,
+          content: card.body,
+          date: card.date || undefined,
+          location: card.location || undefined,
+          photos: card.photos,
+          voiceNote: card.voiceNote
+        });
+        const savedMemory = response.data.memory;
+        setCards(prev => prev.map(c => (c.id === id ? {
+          ...c,
+          id: savedMemory._id,
+          saved: true
+        } : c)));
+      } catch (err) {
+        console.error('Failed to save memory:', err);
+        alert('Failed to save memory. Please try again.');
+      }
+    } else {
+      // Just mark as saved in local UI view state
+      setCards(prev => prev.map(c => (c.id === id ? { ...c, saved: true } : c)));
+    }
+  };
 
   // Enter edit mode for a saved card
   const editCard = id =>
     setCards(prev => prev.map(c => (c.id === id ? { ...c, saved: false } : c)));
 
-  // Delete a card (keep at least 1 unsaved card)
-  const deleteCard = id => {
+  // Delete a card
+  const deleteCard = async (id) => {
+    if (!id.startsWith('temp-')) {
+      try {
+        await deleteMemory(id);
+      } catch (err) {
+        console.error('Failed to delete memory from database:', err);
+        alert('Failed to delete memory. Please try again.');
+        return;
+      }
+    }
     setCards(prev => {
       const next = prev.filter(c => c.id !== id);
       return next.length === 0 ? [blankCard()] : next;
@@ -50,7 +124,12 @@ const MemoryCanvas = ({ onFinish }) => {
     setCards(prev => {
       const source = prev.find(c => c.id === id);
       if (!source) return prev;
-      const copy = { ...source, id: makeId(), saved: false, title: source.title ? `${source.title} (copy)` : '' };
+      const copy = {
+        ...source,
+        id: makeTempId(),
+        saved: false,
+        title: source.title ? `${source.title} (copy)` : ''
+      };
       const idx = prev.findIndex(c => c.id === id);
       const next = [...prev];
       next.splice(idx + 1, 0, copy);
@@ -58,10 +137,10 @@ const MemoryCanvas = ({ onFinish }) => {
     });
   };
 
-  // Cancel an unsaved card (remove it, unless it's the only one)
+  // Cancel an unsaved card
   const cancelCard = id => {
     setCards(prev => {
-      if (prev.length === 1) return prev; // keep at least one
+      if (prev.length === 1) return prev;
       return prev.filter(c => c.id !== id);
     });
   };
@@ -69,19 +148,47 @@ const MemoryCanvas = ({ onFinish }) => {
   // Add a fresh blank card below all saved ones
   const addCard = () => {
     setCards(prev => {
-      // Don't add if there's already an unsaved card
       if (prev.some(c => !c.saved)) return prev;
       return [...prev, blankCard()];
     });
   };
 
+  // Handles visual drag-and-drop reordering with Framer Motion
+  const handleReorder = async (newCardsOrder) => {
+    setCards(newCardsOrder);
+
+    // Sync new order to the backend
+    const savedCards = newCardsOrder.filter(c => c.saved && !c.id.startsWith('temp-'));
+    const reorders = savedCards.map((card, index) => ({
+      id: card.id,
+      order: index
+    }));
+
+    if (reorders.length > 0) {
+      try {
+        await bulkReorderMemories(storyId, reorders);
+        console.log('Drag-and-drop ordering synchronized.');
+      } catch (err) {
+        console.error('Failed to sync reordering on backend:', err);
+      }
+    }
+  };
+
   const hasUnsaved = cards.some(c => !c.saved);
   const savedCount = cards.filter(c => c.saved).length;
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-dusty-rose" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* Canvas header */}
-      <div className="mb-8">
+      <div className="mb-8 select-none">
         <p className="text-xs font-semibold text-warm-gray uppercase tracking-widest mb-2">Memory Canvas</p>
         <h2 className="font-serif text-4xl font-bold text-deep-brown mb-3">
           Pour your memories onto the page.
@@ -92,23 +199,31 @@ const MemoryCanvas = ({ onFinish }) => {
         </p>
       </div>
 
-      {/* Card stack */}
-      <AnimatePresence mode="popLayout">
-        {cards.map((card, index) => (
-          <MemoryCard
-            key={card.id}
-            card={card}
-            index={index}
-            isFirst={index === 0 && !card.saved}
-            onChange={data => updateCard(card.id, data)}
-            onSave={() => saveCard(card.id)}
-            onEdit={() => editCard(card.id)}
-            onDelete={() => deleteCard(card.id)}
-            onDuplicate={() => duplicateCard(card.id)}
-            onCancel={() => cancelCard(card.id)}
-          />
-        ))}
-      </AnimatePresence>
+      {/* Card stack (with Framer Motion drag and drop reordering) */}
+      <Reorder.Group values={cards} onReorder={handleReorder} className="space-y-6">
+        <AnimatePresence mode="popLayout">
+          {cards.map((card, index) => (
+            <Reorder.Item
+              key={card.id}
+              value={card}
+              dragListener={card.saved} // disable dragging while typing in input fields
+              className="outline-none"
+            >
+              <MemoryCard
+                card={card}
+                index={index}
+                isFirst={index === 0 && !card.saved}
+                onChange={data => updateCard(card.id, data)}
+                onSave={() => saveCard(card.id)}
+                onEdit={() => editCard(card.id)}
+                onDelete={() => deleteCard(card.id)}
+                onDuplicate={() => duplicateCard(card.id)}
+                onCancel={() => cancelCard(card.id)}
+              />
+            </Reorder.Item>
+          ))}
+        </AnimatePresence>
+      </Reorder.Group>
 
       {/* Add Another Memory CTA */}
       <motion.div
@@ -146,7 +261,7 @@ const MemoryCanvas = ({ onFinish }) => {
             When you're ready, StoryNest will transform them into a beautiful story.
           </p>
           <button
-            onClick={() => navigate('/book-reveal')}
+            onClick={onFinish}
             className="flex items-center gap-2 bg-deep-brown text-warm-ivory px-10 py-4 rounded-full hover:bg-deep-brown/90 transition-colors shadow-soft text-base font-medium group"
           >
             <Sparkles size={18} className="group-hover:animate-pulse" />

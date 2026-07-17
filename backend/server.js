@@ -6,6 +6,8 @@ const dotenv = require('dotenv');
 
 const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
+const storyRoutes = require('./routes/storyRoutes');
+const memoryRoutes = require('./routes/memoryRoutes');
 const notFound = require('./middleware/notFound');
 const errorHandler = require('./middleware/errorHandler');
 const HTTP_STATUS = require('./constants/httpStatus');
@@ -47,6 +49,8 @@ app.get('/api/v1/health', (req, res) => {
 
 // API Routes
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/stories', storyRoutes);
+app.use('/api/v1/memories', memoryRoutes);
 
 // Global 404 Route Handler
 app.use(notFound);

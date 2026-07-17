@@ -1,22 +1,11 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Lock, Globe, Users, Clock, BookOpen, Sparkles, CheckCircle2
 } from 'lucide-react';
 import MemoryCanvas from './components/MemoryCanvas';
-
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-const mockStory = {
-  title: 'My Grandmother',
-  subtitle: 'A lifetime of love and wisdom',
-  subject: 'Nana Rose',
-  relationship: 'Grandmother',
-  privacy: 'Private',
-  progress: 10,
-  lastSaved: 'Just now',
-  coverGradient: 'from-dusty-rose/30 via-soft-beige to-warm-ivory',
-};
+import { getStory } from '../../services/storyService';
 
 const suggestions = [
   'Describe the first time you remember meeting her.',
@@ -37,57 +26,65 @@ const PrivacyBadge = ({ privacy }) => {
   const { icon: Icon, color } = map[privacy] || map.Private;
   return (
     <span className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full ${color}`}>
-      <Icon size={11} /> {privacy}
+      <Icon size={11} /> {privacy || 'Private'}
     </span>
   );
 };
 
 // ─── Left Panel ───────────────────────────────────────────────────────────────
-const LeftPanel = ({ story }) => (
-  <aside className="w-64 shrink-0 sticky top-0 h-screen flex flex-col overflow-y-auto border-r border-warm-gray/10 bg-warm-ivory py-10 px-7">
-    {/* Cover */}
-    <div className={`w-full aspect-[3/4] rounded-2xl bg-gradient-to-br ${story.coverGradient} mb-6 flex items-center justify-center shadow-soft overflow-hidden`}>
-      <BookOpen size={44} className="text-deep-brown/20" strokeWidth={1} />
-    </div>
+const LeftPanel = ({ story }) => {
+  const formatLastSaved = (dateStr) => {
+    if (!dateStr) return 'Never';
+    const date = new Date(dateStr);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' + date.toLocaleDateString();
+  };
 
-    <h2 className="font-serif text-xl font-bold text-deep-brown leading-snug mb-1">
-      {story.title || 'Untitled Story'}
-    </h2>
-    {story.subtitle && (
-      <p className="text-sm text-warm-gray italic mb-4">{story.subtitle}</p>
-    )}
+  return (
+    <aside className="w-64 shrink-0 sticky top-0 h-screen flex flex-col overflow-y-auto border-r border-warm-gray/10 bg-warm-ivory py-10 px-7">
+      {/* Cover */}
+      <div className={`w-full aspect-[3/4] rounded-2xl bg-gradient-to-br ${story.coverGradient || 'from-dusty-rose/30 via-soft-beige to-warm-ivory'} mb-6 flex items-center justify-center shadow-soft overflow-hidden`}>
+        <BookOpen size={44} className="text-deep-brown/20" strokeWidth={1} />
+      </div>
 
-    <div className="flex flex-wrap gap-2 mb-6">
-      <PrivacyBadge privacy={story.privacy} />
-      {story.relationship && (
-        <span className="text-xs font-medium px-3 py-1 rounded-full text-deep-brown bg-soft-beige">
-          {story.relationship}
-        </span>
+      <h2 className="font-serif text-xl font-bold text-deep-brown leading-snug mb-1">
+        {story.title || 'Untitled Story'}
+      </h2>
+      {story.subtitle && (
+        <p className="text-sm text-warm-gray italic mb-4">{story.subtitle}</p>
       )}
-    </div>
 
-    {/* Progress */}
-    <div className="mb-6">
-      <div className="flex justify-between text-xs font-medium text-warm-gray mb-2">
-        <span>Story progress</span>
-        <span>{story.progress}%</span>
+      <div className="flex flex-wrap gap-2 mb-6">
+        <PrivacyBadge privacy={story.visibility} />
+        {story.relationship && (
+          <span className="text-xs font-medium px-3 py-1 rounded-full text-deep-brown bg-soft-beige">
+            {story.relationship}
+          </span>
+        )}
       </div>
-      <div className="w-full bg-soft-beige h-1.5 rounded-full overflow-hidden">
-        <motion.div
-          className="bg-dusty-rose h-full rounded-full"
-          initial={{ width: 0 }}
-          animate={{ width: `${story.progress}%` }}
-          transition={{ duration: 1, ease: 'easeOut', delay: 0.4 }}
-        />
-      </div>
-    </div>
 
-    <div className="flex items-center gap-1.5 text-xs text-warm-gray mt-auto pt-4 border-t border-warm-gray/10">
-      <Clock size={12} />
-      <span>Last saved {story.lastSaved}</span>
-    </div>
-  </aside>
-);
+      {/* Progress */}
+      <div className="mb-6">
+        <div className="flex justify-between text-xs font-medium text-warm-gray mb-2">
+          <span>Story progress</span>
+          <span>{story.progress}%</span>
+        </div>
+        <div className="w-full bg-soft-beige h-1.5 rounded-full overflow-hidden">
+          <motion.div
+            className="bg-dusty-rose h-full rounded-full"
+            initial={{ width: 0 }}
+            animate={{ width: `${story.progress}%` }}
+            transition={{ duration: 1, ease: 'easeOut', delay: 0.4 }}
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5 text-xs text-warm-gray mt-auto pt-4 border-t border-warm-gray/10">
+        <Clock size={12} />
+        <span>Last saved {formatLastSaved(story.lastEdited)}</span>
+      </div>
+    </aside>
+  );
+};
 
 // ─── Suggestions Panel ────────────────────────────────────────────────────────
 const SuggestionsPanel = ({ open, onToggle }) => (
@@ -146,11 +143,52 @@ const SuggestionsPanel = ({ open, onToggle }) => (
 // ─── Main Workspace ───────────────────────────────────────────────────────────
 const Workspace = () => {
   const navigate = useNavigate();
+  const { storyId } = useParams();
+  const [story, setStory] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+
+  useEffect(() => {
+    const fetchStory = async () => {
+      try {
+        const response = await getStory(storyId);
+        setStory(response.data.story);
+      } catch (err) {
+        console.error('Failed to load story details:', err);
+        setError('Failed to load story. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchStory();
+  }, [storyId]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-warm-ivory flex justify-center items-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-dusty-rose" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-warm-ivory flex flex-col justify-center items-center gap-4">
+        <p className="text-red-500 font-semibold">{error}</p>
+        <button 
+          onClick={() => navigate('/dashboard')}
+          className="bg-deep-brown text-warm-ivory px-6 py-2 rounded-full text-sm font-semibold hover:bg-deep-brown/95 transition-colors"
+        >
+          Back to Dashboard
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-warm-ivory flex relative">
-      <LeftPanel story={mockStory} />
+      <LeftPanel story={story} />
 
       {/* Main canvas area */}
       <main
@@ -159,7 +197,10 @@ const Workspace = () => {
         }`}
       >
         <div className="max-w-2xl mx-auto">
-          <MemoryCanvas onFinish={() => navigate('/dashboard')} />
+          <MemoryCanvas 
+            storyId={storyId} 
+            onFinish={() => navigate(`/book-reveal/${storyId}`)} 
+          />
 
           <p className="text-xs text-warm-gray/50 mt-16 leading-relaxed text-center">
             Your memories are auto-saved and completely private. You can return and add more at any time.

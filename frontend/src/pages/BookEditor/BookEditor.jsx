@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
-import { mockStories } from '../../data/stories';
+import { getStory } from '../../services/storyService';
 import EditorHeader from './components/EditorHeader';
 import LeftSidebar from './components/LeftSidebar';
 import RightSidebar from './components/RightSidebar';
@@ -50,7 +50,6 @@ const ReflectionPage = ({ reflection }) => (
         ))}
       </div>
 
-      {/* Closing ornament */}
       <div className="flex justify-center pt-12">
         <div className="flex items-center gap-3 text-warm-gray/25 select-none">
           <div className="w-8 h-[1px] bg-current" />
@@ -69,15 +68,15 @@ const ReflectionPage = ({ reflection }) => (
 // ── Main BookEditor ──────────────────────────────────────────────────────────
 const BookEditor = () => {
   const { storyId } = useParams();
+  const navigate = useNavigate();
 
-  // Load from mock data layer — deeply clone so state edits don't mutate source
-  const sourceStory = mockStories.find(s => s.id === storyId) || mockStories[0];
-  const [chapters, setChapters] = useState(() =>
-    (sourceStory.book?.chapters || []).map(ch => ({ ...ch }))
-  );
-  const [activeChapterId, setActiveChapterId] = useState(
-    sourceStory.book?.chapters?.[0]?.id || 'reflection'
-  );
+  const [story, setStory] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const [chapters, setChapters] = useState([]);
+  const [activeChapterId, setActiveChapterId] = useState('reflection');
+  
   const [collapsedChapters, setCollapsedChapters] = useState(new Set());
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
   const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
@@ -86,10 +85,33 @@ const BookEditor = () => {
   // The editable area ref — FloatingToolbar scopes selection checks to this
   const editorAreaRef = useRef(null);
 
+  useEffect(() => {
+    const fetchStory = async () => {
+      try {
+        const response = await getStory(storyId);
+        const fetchedStory = response.data.story;
+        setStory(fetchedStory);
+        
+        if (fetchedStory.generatedBook) {
+          const loadedChapters = (fetchedStory.generatedBook.chapters || []).map(ch => ({ ...ch }));
+          setChapters(loadedChapters);
+          if (loadedChapters.length > 0) {
+            setActiveChapterId(loadedChapters[0].id || loadedChapters[0]._id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load story for editor:', err);
+        setError('Failed to load story for editor.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchStory();
+  }, [storyId]);
+
   // ── Chapter management ───────────────────────────────────────────────────
   const handleSelectChapter = useCallback((id) => {
     setActiveChapterId(id);
-    // Scroll to chapter page
     setTimeout(() => {
       const el = document.getElementById(`chapter-${id}`);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -98,15 +120,15 @@ const BookEditor = () => {
 
   const handleRenameChapter = useCallback((id, newTitle) => {
     setChapters(prev =>
-      prev.map(ch => ch.id === id ? { ...ch, title: newTitle } : ch)
+      prev.map(ch => (ch.id === id || ch._id === id) ? { ...ch, title: newTitle } : ch)
     );
   }, []);
 
   const handleDeleteChapter = useCallback((id) => {
     setChapters(prev => {
-      const next = prev.filter(ch => ch.id !== id);
+      const next = prev.filter(ch => ch.id !== id && ch._id !== id);
       if (activeChapterId === id) {
-        setActiveChapterId(next[0]?.id || 'reflection');
+        setActiveChapterId(next[0]?.id || next[0]?._id || 'reflection');
       }
       return next;
     });
@@ -114,12 +136,13 @@ const BookEditor = () => {
 
   const handleDuplicateChapter = useCallback((id) => {
     setChapters(prev => {
-      const idx = prev.findIndex(ch => ch.id === id);
+      const idx = prev.findIndex(ch => ch.id === id || ch._id === id);
       if (idx === -1) return prev;
       const original = prev[idx];
       const copy = {
         ...original,
-        id: `${original.id}-copy-${Date.now()}`,
+        id: `${original.id || original._id}-copy-${Date.now()}`,
+        _id: undefined,
         title: `${original.title} (Copy)`,
       };
       const next = [...prev];
@@ -140,8 +163,8 @@ const BookEditor = () => {
   const handleMoveChapter = useCallback((dragId, overId) => {
     setChapters(prev => {
       const next = [...prev];
-      const fromIdx = next.findIndex(ch => ch.id === dragId);
-      const toIdx = next.findIndex(ch => ch.id === overId);
+      const fromIdx = next.findIndex(ch => ch.id === dragId || ch._id === dragId);
+      const toIdx = next.findIndex(ch => ch.id === overId || ch._id === overId);
       if (fromIdx === -1 || toIdx === -1) return prev;
       const [moved] = next.splice(fromIdx, 1);
       next.splice(toIdx, 0, moved);
@@ -166,15 +189,36 @@ const BookEditor = () => {
     }, 100);
   }, []);
 
-  // Compute the page number for a chapter
   const getPageNumber = (idx) => 5 + idx * 2;
+
+  if (loading) {
+    return (
+      <div className="h-screen flex justify-center items-center bg-[#f0ede7]">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-dusty-rose" />
+      </div>
+    );
+  }
+
+  if (error || !story) {
+    return (
+      <div className="h-screen flex flex-col justify-center items-center bg-[#f0ede7] gap-4">
+        <p className="text-red-500 font-semibold">{error || 'Story not found.'}</p>
+        <button 
+          onClick={() => navigate('/dashboard')} 
+          className="bg-deep-brown text-warm-ivory px-6 py-2 rounded-full text-sm font-semibold hover:bg-deep-brown/95 transition-colors"
+        >
+          Back to Dashboard
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#f0ede7]">
 
       {/* ── Top Header ─── */}
       <EditorHeader
-        story={sourceStory}
+        story={story}
         onVersionHistoryOpen={() => setVersionHistoryOpen(true)}
       />
 
@@ -192,7 +236,7 @@ const BookEditor = () => {
               className="overflow-hidden shrink-0 h-full"
             >
               <LeftSidebar
-                story={sourceStory}
+                story={story}
                 chapters={chapters}
                 activeChapterId={activeChapterId}
                 collapsedChapters={collapsedChapters}
@@ -231,24 +275,27 @@ const BookEditor = () => {
             <div className="pointer-events-none fixed top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-dusty-rose/5 blur-3xl rounded-full" />
 
             {/* Chapters */}
-            {chapters.map((chapter, idx) => (
-              <div
-                key={chapter.id}
-                id={`chapter-${chapter.id}`}
-                onClick={() => setActiveChapterId(chapter.id)}
-                className={`transition-all duration-200 ${
-                  activeChapterId === chapter.id
-                    ? 'ring-2 ring-dusty-rose/20 ring-offset-4 ring-offset-transparent rounded-2xl'
-                    : ''
-                }`}
-              >
-                <ChapterPage
-                  chapter={chapter}
-                  pageNumber={getPageNumber(idx)}
-                  isCollapsed={collapsedChapters.has(chapter.id)}
-                />
-              </div>
-            ))}
+            {chapters.map((chapter, idx) => {
+              const chId = chapter.id || chapter._id;
+              return (
+                <div
+                  key={chId}
+                  id={`chapter-${chId}`}
+                  onClick={() => setActiveChapterId(chId)}
+                  className={`transition-all duration-200 ${
+                    activeChapterId === chId
+                      ? 'ring-2 ring-dusty-rose/20 ring-offset-4 ring-offset-transparent rounded-2xl'
+                      : ''
+                  }`}
+                >
+                  <ChapterPage
+                    chapter={chapter}
+                    pageNumber={getPageNumber(idx)}
+                    isCollapsed={collapsedChapters.has(chId)}
+                  />
+                </div>
+              );
+            })}
 
             {/* Reflection page */}
             <div
@@ -260,7 +307,7 @@ const BookEditor = () => {
                   : ''
               }`}
             >
-              <ReflectionPage reflection={sourceStory.book?.reflection} />
+              <ReflectionPage reflection={story.generatedBook?.reflection} />
             </div>
 
             {/* Bottom spacer */}

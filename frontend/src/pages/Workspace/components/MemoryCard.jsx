@@ -1,9 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ImagePlus, Mic, Calendar, MapPin, Check,
   Pencil, Trash2, Copy, X, ChevronDown, ChevronUp, MicOff
 } from 'lucide-react';
+import { updateMemory } from '../../../../services/memoryService';
 
 // ─── Saved Card View ──────────────────────────────────────────────────────────
 const SavedMemoryCard = ({ card, index, onEdit, onDelete, onDuplicate }) => (
@@ -13,7 +14,7 @@ const SavedMemoryCard = ({ card, index, onEdit, onDelete, onDuplicate }) => (
     animate={{ opacity: 1, y: 0 }}
     exit={{ opacity: 0, scale: 0.97, y: -10 }}
     transition={{ duration: 0.35, ease: 'easeOut' }}
-    className="relative bg-white border border-warm-gray/10 rounded-3xl p-8 shadow-soft group"
+    className="relative bg-white border border-warm-gray/10 rounded-3xl p-8 shadow-soft group cursor-grab active:cursor-grabbing"
   >
     {/* Corner index chip */}
     <span className="absolute top-5 right-5 text-xs font-semibold text-warm-gray/40 select-none">
@@ -50,7 +51,7 @@ const SavedMemoryCard = ({ card, index, onEdit, onDelete, onDuplicate }) => (
 
     {/* Indicator pills */}
     <div className="flex flex-wrap gap-2 mb-2">
-      {card.hasVoice && (
+      {card.voiceNote && (
         <span className="flex items-center gap-1 text-xs bg-dusty-rose/10 text-dusty-rose px-3 py-1 rounded-full">
           <Mic size={10} /> Voice note attached
         </span>
@@ -92,12 +93,78 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
   const [recording, setRecording] = useState(false);
   const textareaRef = useRef(null);
 
-  const handleSave = () => {
+  const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
+  const debounceTimerRef = useRef(null);
+
+  // Debounced autosave method
+  const triggerAutosave = (updatedCard) => {
+    if (updatedCard.id.startsWith('temp-')) return; // do not autosave local unsaved drafts
+
+    setSaveStatus('saving');
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    debounceTimerRef.current = setTimeout(async () => {
+      try {
+        await updateMemory(updatedCard.id, {
+          title: updatedCard.title || undefined,
+          content: updatedCard.body,
+          date: updatedCard.date || undefined,
+          location: updatedCard.location || undefined,
+          photos: updatedCard.photos,
+          voiceNote: updatedCard.voiceNote
+        });
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 3000);
+      } catch (err) {
+        console.error('Autosave failed:', err);
+        setSaveStatus('error');
+      }
+    }, 2000);
+  };
+
+  // Clear debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleSave = async () => {
     if (!card.body.trim()) {
       textareaRef.current?.focus();
       return;
     }
-    onSave();
+
+    // Clear debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    if (card.id.startsWith('temp-')) {
+      onSave(); // let parent component handle creation POST
+    } else {
+      setSaveStatus('saving');
+      try {
+        await updateMemory(card.id, {
+          title: card.title || undefined,
+          content: card.body,
+          date: card.date || undefined,
+          location: card.location || undefined,
+          photos: card.photos,
+          voiceNote: card.voiceNote
+        });
+        setSaveStatus('idle');
+        onSave(); // mark as saved (read-only view)
+      } catch (err) {
+        console.error('Save failed:', err);
+        setSaveStatus('error');
+      }
+    }
   };
 
   return (
@@ -124,7 +191,11 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
         type="text"
         placeholder="Give this memory a name… (optional)"
         value={card.title}
-        onChange={e => onChange({ ...card, title: e.target.value })}
+        onChange={e => {
+          const nextCard = { ...card, title: e.target.value };
+          onChange(nextCard);
+          triggerAutosave(nextCard);
+        }}
         className="w-full font-serif text-2xl font-bold text-deep-brown placeholder:text-warm-gray/30 bg-transparent border-none outline-none mb-6 pr-8"
       />
 
@@ -134,7 +205,11 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
         rows={7}
         placeholder="Write this memory in your own words… let it flow naturally."
         value={card.body}
-        onChange={e => onChange({ ...card, body: e.target.value })}
+        onChange={e => {
+          const nextCard = { ...card, body: e.target.value };
+          onChange(nextCard);
+          triggerAutosave(nextCard);
+        }}
         className="w-full bg-warm-ivory/70 rounded-2xl px-5 py-4 text-deep-brown placeholder:text-warm-gray/40 leading-relaxed resize-none focus:ring-2 focus:ring-dusty-rose outline-none transition-all text-base"
       />
 
@@ -152,7 +227,9 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
         <button
           onClick={() => {
             setRecording(r => !r);
-            onChange({ ...card, hasVoice: !recording ? true : card.hasVoice });
+            const nextCard = { ...card, voiceNote: !recording ? 'voice_recording.mp3' : card.voiceNote };
+            onChange(nextCard);
+            triggerAutosave(nextCard);
           }}
           className={`flex items-center gap-2 text-sm font-medium transition-colors px-4 py-2 rounded-full ${
             recording
@@ -191,7 +268,11 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
                   type="text"
                   placeholder="Date (e.g. Summer 2019)"
                   value={card.date}
-                  onChange={e => onChange({ ...card, date: e.target.value })}
+                  onChange={e => {
+                    const nextCard = { ...card, date: e.target.value };
+                    onChange(nextCard);
+                    triggerAutosave(nextCard);
+                  }}
                   className="bg-transparent text-sm text-deep-brown placeholder:text-warm-gray/40 outline-none w-full"
                 />
               </div>
@@ -201,7 +282,11 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
                   type="text"
                   placeholder="Location (e.g. Kyoto, Japan)"
                   value={card.location}
-                  onChange={e => onChange({ ...card, location: e.target.value })}
+                  onChange={e => {
+                    const nextCard = { ...card, location: e.target.value };
+                    onChange(nextCard);
+                    triggerAutosave(nextCard);
+                  }}
                   className="bg-transparent text-sm text-deep-brown placeholder:text-warm-gray/40 outline-none w-full"
                 />
               </div>
@@ -211,7 +296,22 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
       </AnimatePresence>
 
       {/* Save */}
-      <div className="mt-6 flex justify-end">
+      <div className="mt-6 flex justify-end items-center gap-4">
+        {saveStatus === 'saving' && (
+          <span className="text-xs text-dusty-rose animate-pulse flex items-center gap-1.5 font-medium select-none">
+            <span className="w-1.5 h-1.5 rounded-full bg-dusty-rose" /> Saving...
+          </span>
+        )}
+        {saveStatus === 'saved' && (
+          <span className="text-xs text-sage-green flex items-center gap-1.5 font-medium select-none">
+            <span className="w-1.5 h-1.5 rounded-full bg-sage-green" /> Saved
+          </span>
+        )}
+        {saveStatus === 'error' && (
+          <span className="text-xs text-red-400 font-medium select-none">
+            Save failed
+          </span>
+        )}
         <motion.button
           whileTap={{ scale: 0.97 }}
           onClick={handleSave}

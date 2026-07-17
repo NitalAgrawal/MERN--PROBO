@@ -6,6 +6,7 @@ import { ArrowLeft, X } from 'lucide-react';
 import Step1ChooseTemplate from './components/Step1ChooseTemplate';
 import Step2StoryDetails from './components/Step2StoryDetails';
 import Step3AddMemories from './components/Step3AddMemories';
+import { createStory } from '../../services/storyService';
 
 const CreateMemory = () => {
   const navigate = useNavigate();
@@ -25,9 +26,22 @@ const CreateMemory = () => {
     setStep(2);
   };
 
-  const handleStartWriting = () => {
-    // In the future, this will connect to the backend and redirect to the editor
-    navigate('/workspace');
+  const handleStartWriting = async () => {
+    try {
+      const response = await createStory({
+        subject: formData.about,
+        relationship: formData.relationship || undefined,
+        title: formData.title || undefined,
+        subtitle: formData.subtitle || undefined,
+        visibility: formData.privacy,
+        status: 'Collecting Memories'
+      });
+      const createdStory = response.data.story;
+      navigate(`/workspace/${createdStory._id}`);
+    } catch (err) {
+      console.error('Failed to create story:', err);
+      alert('Failed to start writing. Please try again.');
+    }
   };
 
   return (
