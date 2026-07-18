@@ -44,6 +44,16 @@ const generatedBookSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
+// Each element is one complete generation run — an immutable audit trail
+const generationHistorySchema = new mongoose.Schema({
+  prompt:         { type: String },
+  rawResponse:    { type: String },
+  provider:       { type: String },
+  model:          { type: String },
+  generationTime: { type: Number }, // ms
+  createdAt:      { type: Date, default: Date.now }
+}, { _id: false });
+
 const storySchema = new mongoose.Schema({
   owner: {
     type: mongoose.Schema.Types.ObjectId,
@@ -92,6 +102,11 @@ const storySchema = new mongoose.Schema({
   generatedBook: {
     type: generatedBookSchema,
     default: null
+  },
+  // Immutable audit trail of every generation run — never overwritten
+  generationHistory: {
+    type: [generationHistorySchema],
+    default: []
   }
 }, {
   timestamps: true
