@@ -1,5 +1,5 @@
 const express = require('express');
-const { createStory, getStories, getStory, updateStory, deleteStory } = require('../controllers/storyController');
+const { createStory, getStories, getStory, updateStory, deleteStory, generateBook } = require('../controllers/storyController');
 const { createStorySchema, updateStorySchema } = require('../validators/story.schema');
 const validate = require('../validators/validate');
 const { protect } = require('../middleware/auth');
@@ -24,5 +24,8 @@ router.route('/:id')
   .get(getStory)
   .patch(validate(updateStorySchema), updateStory)
   .delete(deleteStory);
+
+// Trigger AI generation for a specific story
+router.post('/:id/generate', generateBook);
 
 module.exports = router;
