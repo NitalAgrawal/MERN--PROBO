@@ -24,7 +24,28 @@ const formatMemory = (memory, index) => {
   if (memory.title)    lines.push(`  Title:    ${memory.title}`);
   if (memory.date)     lines.push(`  Date:     ${memory.date}`);
   if (memory.location) lines.push(`  Location: ${memory.location}`);
+  
+  lines.push('  ## Text');
   lines.push(`  Content:  ${memory.content}`);
+  
+  lines.push('  ## Photos');
+  if (memory.photos && memory.photos.length > 0) {
+    memory.photos.forEach((photo, idx) => {
+      lines.push(`  - Photo ${idx + 1}: ${photo.caption || 'No caption provided'} (URL: ${photo.url})`);
+    });
+  } else {
+    lines.push('  - No photos attached.');
+  }
+
+  lines.push('  ## Voice Notes');
+  if (memory.voiceNotes && memory.voiceNotes.length > 0) {
+    memory.voiceNotes.forEach((voice, idx) => {
+      lines.push(`  - Recording ${idx + 1}: [Voice note attached — transcript not yet available] (Duration: ${voice.duration || 0}s)`);
+    });
+  } else {
+    lines.push('  - No voice notes attached.');
+  }
+
   return lines.join('\n');
 };
 

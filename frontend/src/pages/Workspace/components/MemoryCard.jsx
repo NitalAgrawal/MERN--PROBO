@@ -1,10 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ImagePlus, Mic, Calendar, MapPin, Check,
-  Pencil, Trash2, Copy, X, ChevronDown, ChevronUp, MicOff
+  ImagePlus, Calendar, MapPin, Check,
+  Pencil, Trash2, Copy, X, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { updateMemory } from '../../../../services/memoryService';
+import { updateMemory } from '../../../services/memoryService';
+import PhotoGallery from '../../../components/media/PhotoGallery';
+import VoicePlayer from '../../../components/media/VoicePlayer';
+import {
+  uploadImage as uploadImageService,
+  uploadVoiceNote as uploadVoiceNoteService,
+  deletePhoto as deletePhotoService,
+  deleteVoiceNote as deleteVoiceNoteService
+} from '../../../services/uploadService';
+import { uploadQueue } from '../../../utils/uploadQueue';
 
 // ─── Saved Card View ──────────────────────────────────────────────────────────
 const SavedMemoryCard = ({ card, index, onEdit, onDelete, onDuplicate }) => (
@@ -49,19 +58,18 @@ const SavedMemoryCard = ({ card, index, onEdit, onDelete, onDuplicate }) => (
       </div>
     )}
 
-    {/* Indicator pills */}
-    <div className="flex flex-wrap gap-2 mb-2">
-      {card.voiceNote && (
-        <span className="flex items-center gap-1 text-xs bg-dusty-rose/10 text-dusty-rose px-3 py-1 rounded-full">
-          <Mic size={10} /> Voice note attached
-        </span>
-      )}
-      {card.photos?.length > 0 && (
-        <span className="flex items-center gap-1 text-xs bg-sage-green/15 text-deep-brown px-3 py-1 rounded-full">
-          <ImagePlus size={10} /> {card.photos.length} photo{card.photos.length > 1 ? 's' : ''}
-        </span>
-      )}
-    </div>
+    {/* Media Galleries (Read-only view) */}
+    {card.photos && card.photos.length > 0 && (
+      <div className="mb-5">
+        <PhotoGallery photos={card.photos} isEditable={false} />
+      </div>
+    )}
+
+    {card.voiceNotes && card.voiceNotes.length > 0 && (
+      <div className="mb-5">
+        <VoicePlayer voiceNotes={card.voiceNotes} isEditable={false} />
+      </div>
+    )}
 
     {/* Action bar — appears on hover */}
     <div className="flex items-center gap-2 mt-5 pt-4 border-t border-warm-gray/8 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
@@ -88,10 +96,10 @@ const SavedMemoryCard = ({ card, index, onEdit, onDelete, onDuplicate }) => (
 );
 
 // ─── Editable Card Form ───────────────────────────────────────────────────────
-const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
+const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst, ensureMemoryCreated }) => {
   const [showExtras, setShowExtras] = useState(!!(card.date || card.location));
-  const [recording, setRecording] = useState(false);
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
   const debounceTimerRef = useRef(null);
@@ -114,7 +122,7 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
           date: updatedCard.date || undefined,
           location: updatedCard.location || undefined,
           photos: updatedCard.photos,
-          voiceNote: updatedCard.voiceNote
+          voiceNotes: updatedCard.voiceNotes
         });
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 3000);
@@ -156,7 +164,7 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
           date: card.date || undefined,
           location: card.location || undefined,
           photos: card.photos,
-          voiceNote: card.voiceNote
+          voiceNotes: card.voiceNotes
         });
         setSaveStatus('idle');
         onSave(); // mark as saved (read-only view)
@@ -164,6 +172,141 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
         console.error('Save failed:', err);
         setSaveStatus('error');
       }
+    }
+  };
+
+  const handleImageFileChange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    let targetMemoryId;
+    try {
+      targetMemoryId = await ensureMemoryCreated(card.id, card);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to initialize memory for file upload.');
+      return;
+    }
+
+    // Create local upload preview stubs
+    const newTempPhotos = files.map((file) => ({
+      id: `temp-upload-${Date.now()}-${Math.random()}`,
+      url: URL.createObjectURL(file),
+      thumbnailUrl: URL.createObjectURL(file),
+      status: 'uploading',
+      caption: file.name
+    }));
+
+    // Update state to show uploading progress immediately
+    onChange((current) => ({
+      ...current,
+      photos: [...(current.photos || []), ...newTempPhotos]
+    }));
+
+    // Reset file input value
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
+    // Queue and upload each file (limit concurrent uploads to 3)
+    files.forEach((file, index) => {
+      const tempPhoto = newTempPhotos[index];
+
+      uploadQueue.enqueue(() => uploadImageService(file, targetMemoryId))
+        .then((result) => {
+          onChange((current) => ({
+            ...current,
+            photos: (current.photos || []).map((p) => p.id === tempPhoto.id ? result.photo : p)
+          }));
+        })
+        .catch((err) => {
+          console.error(err);
+          onChange((current) => ({
+            ...current,
+            photos: (current.photos || []).map((p) => p.id === tempPhoto.id ? { ...p, status: 'failed' } : p)
+          }));
+        });
+    });
+  };
+
+  const handleDeletePhoto = async (photoId) => {
+    if (photoId.startsWith('temp-')) {
+      onChange((current) => ({
+        ...current,
+        photos: (current.photos || []).filter((p) => p.id !== photoId && p._id !== photoId)
+      }));
+      return;
+    }
+
+    try {
+      await deletePhotoService(card.id, photoId);
+      onChange((current) => ({
+        ...current,
+        photos: (current.photos || []).filter((p) => p._id !== photoId)
+      }));
+    } catch (err) {
+      console.error(err);
+      alert('Failed to delete photo.');
+    }
+  };
+
+  const handleAddVoice = async (audioBlob) => {
+    let targetMemoryId;
+    try {
+      targetMemoryId = await ensureMemoryCreated(card.id, card);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to initialize memory for voice note.');
+      return;
+    }
+
+    const tempVoiceId = `temp-voice-${Date.now()}-${Math.random()}`;
+    const tempVoice = {
+      id: tempVoiceId,
+      url: URL.createObjectURL(audioBlob),
+      status: 'uploading',
+      duration: 0
+    };
+
+    onChange((current) => ({
+      ...current,
+      voiceNotes: [...(current.voiceNotes || []), tempVoice]
+    }));
+
+    uploadQueue.enqueue(() => uploadVoiceNoteService(audioBlob, targetMemoryId))
+      .then((result) => {
+        onChange((current) => ({
+          ...current,
+          voiceNotes: (current.voiceNotes || []).map((v) => v.id === tempVoiceId ? result.voiceNote : v)
+        }));
+      })
+      .catch((err) => {
+        console.error(err);
+        onChange((current) => ({
+          ...current,
+          voiceNotes: (current.voiceNotes || []).map((v) => v.id === tempVoiceId ? { ...v, status: 'failed' } : v)
+        }));
+      });
+  };
+
+  const handleDeleteVoice = async (voiceId) => {
+    if (voiceId.startsWith('temp-')) {
+      onChange((current) => ({
+        ...current,
+        voiceNotes: (current.voiceNotes || []).filter((v) => v.id !== voiceId && v._id !== voiceId)
+      }));
+      return;
+    }
+
+    try {
+      await deleteVoiceNoteService(card.id, voiceId);
+      onChange((current) => ({
+        ...current,
+        voiceNotes: (current.voiceNotes || []).filter((v) => v._id !== voiceId)
+      }));
+    } catch (err) {
+      console.error(err);
+      alert('Failed to delete voice note.');
     }
   };
 
@@ -213,33 +356,44 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
         className="w-full bg-warm-ivory/70 rounded-2xl px-5 py-4 text-deep-brown placeholder:text-warm-gray/40 leading-relaxed resize-none focus:ring-2 focus:ring-dusty-rose outline-none transition-all text-base"
       />
 
+      {/* Photos Preview in Edit Mode */}
+      {card.photos && card.photos.length > 0 && (
+        <div className="mb-4">
+          <PhotoGallery photos={card.photos} isEditable={true} onDeletePhoto={handleDeletePhoto} />
+        </div>
+      )}
+
+      {/* Voice Notes Preview in Edit Mode */}
+      {card.voiceNotes && card.voiceNotes.length > 0 && (
+        <div className="mb-4">
+          <VoicePlayer voiceNotes={card.voiceNotes} isEditable={true} onDeleteVoice={handleDeleteVoice} />
+        </div>
+      )}
+
       {/* Toolbar Row */}
       <div className="flex items-center gap-3 mt-4 flex-wrap">
 
-        {/* Photos */}
+        {/* Photos Picker */}
         <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-deep-brown hover:text-dusty-rose transition-colors bg-soft-beige hover:bg-dusty-rose/10 px-4 py-2 rounded-full">
           <ImagePlus size={15} />
           Add Photos
-          <input type="file" className="hidden" accept="image/*" multiple />
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept="image/*"
+            multiple
+            onChange={handleImageFileChange}
+          />
         </label>
 
-        {/* Voice */}
-        <button
-          onClick={() => {
-            setRecording(r => !r);
-            const nextCard = { ...card, voiceNote: !recording ? 'voice_recording.mp3' : card.voiceNote };
-            onChange(nextCard);
-            triggerAutosave(nextCard);
-          }}
-          className={`flex items-center gap-2 text-sm font-medium transition-colors px-4 py-2 rounded-full ${
-            recording
-              ? 'bg-dusty-rose text-warm-ivory animate-pulse'
-              : 'text-deep-brown hover:text-dusty-rose bg-soft-beige hover:bg-dusty-rose/10'
-          }`}
-        >
-          {recording ? <MicOff size={15} /> : <Mic size={15} />}
-          {recording ? 'Stop Recording' : 'Record Voice'}
-        </button>
+        {/* Live Audio Recorder trigger */}
+        <VoicePlayer
+          voiceNotes={[]}
+          isEditable={true}
+          onAddVoice={handleAddVoice}
+          onDeleteVoice={handleDeleteVoice}
+        />
 
         {/* Date / Location toggle */}
         <button
@@ -326,7 +480,7 @@ const MemoryCardForm = ({ card, onChange, onSave, onCancel, isFirst }) => {
 };
 
 // ─── Exported MemoryCard (smart wrapper) ─────────────────────────────────────
-const MemoryCard = ({ card, index, onChange, onSave, onEdit, onDelete, onDuplicate, onCancel, isFirst }) => {
+const MemoryCard = ({ card, index, onChange, onSave, onEdit, onDelete, onDuplicate, onCancel, isFirst, ensureMemoryCreated }) => {
   if (card.saved) {
     return (
       <SavedMemoryCard
@@ -345,6 +499,7 @@ const MemoryCard = ({ card, index, onChange, onSave, onEdit, onDelete, onDuplica
       onSave={onSave}
       onCancel={onCancel}
       isFirst={isFirst}
+      ensureMemoryCreated={ensureMemoryCreated}
     />
   );
 };

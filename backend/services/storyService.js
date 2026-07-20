@@ -2,6 +2,7 @@ const Story = require('../models/Story');
 const Memory = require('../models/Memory');
 const AppError = require('../utils/AppError');
 const HTTP_STATUS = require('../constants/httpStatus');
+const mediaService = require('./mediaService');
 
 /**
  * Calculates the story progress dynamically based on status and memory count.
@@ -87,6 +88,33 @@ const deleteStory = async (userId, storyId) => {
   const story = await Story.findOne({ _id: storyId, owner: userId });
   if (!story) {
     throw new AppError('Story not found or you do not have access.', HTTP_STATUS.NOT_FOUND);
+  }
+
+  // Find all memories first to clean up associated Cloudinary files
+  const memories = await Memory.find({ storyId });
+  for (const memory of memories) {
+    if (memory.photos && memory.photos.length > 0) {
+      for (const photo of memory.photos) {
+        if (photo.publicId) {
+          try {
+            await mediaService.deleteAsset(photo.publicId, 'image');
+          } catch (err) {
+            console.error(`Failed to delete photo ${photo.publicId} during story delete:`, err);
+          }
+        }
+      }
+    }
+    if (memory.voiceNotes && memory.voiceNotes.length > 0) {
+      for (const voice of memory.voiceNotes) {
+        if (voice.publicId) {
+          try {
+            await mediaService.deleteAsset(voice.publicId, 'video');
+          } catch (err) {
+            console.error(`Failed to delete voice note ${voice.publicId} during story delete:`, err);
+          }
+        }
+      }
+    }
   }
 
   await Story.deleteOne({ _id: storyId });

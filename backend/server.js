@@ -8,6 +8,8 @@ const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 const storyRoutes = require('./routes/storyRoutes');
 const memoryRoutes = require('./routes/memoryRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
+const { configureCloudinary } = require('./config/cloudinary');
 const notFound = require('./middleware/notFound');
 const errorHandler = require('./middleware/errorHandler');
 const HTTP_STATUS = require('./constants/httpStatus');
@@ -17,6 +19,9 @@ dotenv.config();
 
 // Connect to database
 connectDB();
+
+// Initialize Cloudinary SDK
+configureCloudinary();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -51,6 +56,7 @@ app.get('/api/v1/health', (req, res) => {
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/stories', storyRoutes);
 app.use('/api/v1/memories', memoryRoutes);
+app.use('/api/v1/uploads', uploadRoutes);
 
 // Global 404 Route Handler
 app.use(notFound);

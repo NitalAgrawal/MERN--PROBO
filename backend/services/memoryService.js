@@ -2,6 +2,7 @@ const Memory = require('../models/Memory');
 const Story = require('../models/Story');
 const AppError = require('../utils/AppError');
 const HTTP_STATUS = require('../constants/httpStatus');
+const mediaService = require('./mediaService');
 
 /**
  * Helper to verify story ownership.
@@ -79,6 +80,31 @@ const deleteMemory = async (userId, memoryId) => {
   }
 
   const story = await verifyStoryOwnership(memory.storyId, userId);
+
+  // Clean up associated Cloudinary assets before deleting document
+  if (memory.photos && memory.photos.length > 0) {
+    for (const photo of memory.photos) {
+      if (photo.publicId) {
+        try {
+          await mediaService.deleteAsset(photo.publicId, 'image');
+        } catch (cloudinaryErr) {
+          console.error(`Failed to delete photo ${photo.publicId} from Cloudinary during memory delete:`, cloudinaryErr);
+        }
+      }
+    }
+  }
+
+  if (memory.voiceNotes && memory.voiceNotes.length > 0) {
+    for (const voice of memory.voiceNotes) {
+      if (voice.publicId) {
+        try {
+          await mediaService.deleteAsset(voice.publicId, 'video');
+        } catch (cloudinaryErr) {
+          console.error(`Failed to delete voice note ${voice.publicId} from Cloudinary during memory delete:`, cloudinaryErr);
+        }
+      }
+    }
+  }
 
   await Memory.deleteOne({ _id: memoryId });
 

@@ -16,13 +16,23 @@ const memorySchema = new mongoose.Schema({
     required: [true, 'Content is required.'],
     trim: true
   },
-  photos: {
-    type: [String],
-    default: []
-  },
-  voiceNote: {
-    type: String
-  },
+  photos: [{
+    url: { type: String, required: true },
+    thumbnailUrl: { type: String },
+    publicId: { type: String, required: true },
+    width: { type: Number },
+    height: { type: Number },
+    caption: { type: String, trim: true },
+    status: { type: String, enum: ['uploading', 'uploaded', 'failed'], default: 'uploaded' },
+    uploadedAt: { type: Date, default: Date.now }
+  }],
+  voiceNotes: [{
+    url: { type: String, required: true },
+    publicId: { type: String, required: true },
+    duration: { type: Number },
+    status: { type: String, enum: ['uploading', 'uploaded', 'failed'], default: 'uploaded' },
+    uploadedAt: { type: Date, default: Date.now }
+  }],
   date: {
     type: String,
     trim: true

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { PlusCircle, Sparkles } from 'lucide-react';
 import MemoryCard from './MemoryCard';
-import { getMemories, createMemory, deleteMemory, bulkReorderMemories } from '../../../../services/memoryService';
+import { getMemories, createMemory, deleteMemory, bulkReorderMemories } from '../../../services/memoryService';
 
 // ─── Temp ID generator ────────────────────────────────────────────────────────
 let tempIdCounter = 1;
@@ -17,7 +17,7 @@ const blankCard = () => ({
   date: '',
   location: '',
   photos: [],
-  voiceNote: '',
+  voiceNotes: [],
   saved: false,
 });
 
@@ -41,7 +41,7 @@ const MemoryCanvas = ({ storyId, onFinish }) => {
             date: m.date || '',
             location: m.location || '',
             photos: m.photos || [],
-            voiceNote: m.voiceNote || '',
+            voiceNotes: m.voiceNotes || [],
             saved: true
           }));
           setCards(mappedCards);
@@ -63,9 +63,39 @@ const MemoryCanvas = ({ storyId, onFinish }) => {
     }
   }, [storyId]);
 
-  // Update a single card's data in local state
-  const updateCard = (id, data) =>
-    setCards(prev => prev.map(c => (c.id === id ? data : c)));
+  // Update a single card's data in local state (supports callbacks for safe concurrent updates)
+  const updateCard = (id, updaterOrData) =>
+    setCards(prev => prev.map(c => {
+      if (c.id === id) {
+        return typeof updaterOrData === 'function' ? updaterOrData(c) : updaterOrData;
+      }
+      return c;
+    }));
+
+  // Ensure a temporary memory exists in the database before uploading media
+  const ensureMemoryCreated = async (id, currentData) => {
+    if (!id.startsWith('temp-')) return id;
+
+    try {
+      const response = await createMemory(storyId, {
+        title: currentData.title || undefined,
+        content: currentData.body || 'Untitled Memory',
+        date: currentData.date || undefined,
+        location: currentData.location || undefined,
+        photos: currentData.photos || [],
+        voiceNotes: currentData.voiceNotes || []
+      });
+      const savedMemory = response.data.memory;
+      setCards(prev => prev.map(c => (c.id === id ? {
+        ...c,
+        id: savedMemory._id
+      } : c)));
+      return savedMemory._id;
+    } catch (err) {
+      console.error('Failed to auto-create memory for media upload:', err);
+      throw err;
+    }
+  };
 
   // Save a memory card
   const saveCard = async (id) => {
@@ -80,7 +110,7 @@ const MemoryCanvas = ({ storyId, onFinish }) => {
           date: card.date || undefined,
           location: card.location || undefined,
           photos: card.photos,
-          voiceNote: card.voiceNote
+          voiceNotes: card.voiceNotes
         });
         const savedMemory = response.data.memory;
         setCards(prev => prev.map(c => (c.id === id ? {
@@ -128,7 +158,9 @@ const MemoryCanvas = ({ storyId, onFinish }) => {
         ...source,
         id: makeTempId(),
         saved: false,
-        title: source.title ? `${source.title} (copy)` : ''
+        title: source.title ? `${source.title} (copy)` : '',
+        photos: source.photos ? [...source.photos] : [],
+        voiceNotes: source.voiceNotes ? [...source.voiceNotes] : []
       };
       const idx = prev.findIndex(c => c.id === id);
       const next = [...prev];
@@ -219,6 +251,7 @@ const MemoryCanvas = ({ storyId, onFinish }) => {
                 onDelete={() => deleteCard(card.id)}
                 onDuplicate={() => duplicateCard(card.id)}
                 onCancel={() => cancelCard(card.id)}
+                ensureMemoryCreated={ensureMemoryCreated}
               />
             </Reorder.Item>
           ))}
