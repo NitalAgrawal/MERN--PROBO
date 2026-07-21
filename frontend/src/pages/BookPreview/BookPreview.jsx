@@ -2,10 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft, Pencil, BookOpen, Sparkles, BookMarked, Printer, Download,
-  Share2, Image as ImageIcon, Menu, X, ChevronRight, Eye
+  ArrowLeft, Pencil, BookOpen, Printer, Download,
+  Share2, Menu, X, ChevronRight, Eye,
+  FileText, Book, Code, CheckCircle2, AlertCircle, Loader2
 } from 'lucide-react';
 import { getStory } from '../../services/storyService';
+import { exportBook, getExportHistory } from '../../services/storyService';
 
 const BookPreview = () => {
   const { storyId } = useParams();
@@ -27,6 +29,17 @@ const BookPreview = () => {
   const containerRef = useRef(null);
   const sectionsRef = useRef({});
 
+  // ── Export state ──────────────────────────────────────────────────────────
+  // { pdf: { status: 'idle'|'loading'|'done'|'error', fileUrl, fileSize, pageCount, cached }, ... }
+  const [exports, setExports] = useState({ pdf: null, epub: null, html: null });
+
+  const FORMAT_META = [
+    { key: 'pdf',  label: 'Download PDF',  icon: FileText, ext: 'PDF',  desc: 'Print-ready A4' },
+    { key: 'epub', label: 'Download ePub', icon: Book,     ext: 'ePub', desc: 'For e-readers' },
+    { key: 'html', label: 'Download HTML', icon: Code,     ext: 'HTML', desc: 'Web & print' },
+    { key: 'print',label: 'Print Version', icon: Printer,  ext: 'PDF',  desc: 'Open PDF to print', isPrint: true }
+  ];
+
   useEffect(() => {
     const fetchStory = async () => {
       try {
@@ -34,7 +47,6 @@ const BookPreview = () => {
         const fetchedStory = response.data.story;
         setStory(fetchedStory);
         if (!fetchedStory.generatedBook) {
-          // If no generated book yet, redirect to the reveal/compilation page
           navigate(`/book-reveal/${storyId}`);
         }
       } catch (err) {
@@ -46,6 +58,31 @@ const BookPreview = () => {
     };
     fetchStory();
   }, [storyId, navigate]);
+
+  // Fetch existing exports on mount to pre-populate cached states
+  useEffect(() => {
+    if (!storyId) return;
+    getExportHistory(storyId)
+      .then((res) => {
+        const history = res?.data?.exports || [];
+        const updated = { pdf: null, epub: null, html: null };
+        // Use most recent completed entry per format
+        ['pdf', 'epub', 'html'].forEach((fmt) => {
+          const entry = history.find((e) => e.format === fmt && e.status === 'completed');
+          if (entry) {
+            updated[fmt] = {
+              status:    'done',
+              fileUrl:   entry.fileUrl,
+              fileSize:  entry.fileSize,
+              pageCount: entry.pageCount,
+              cached:    true
+            };
+          }
+        });
+        setExports(updated);
+      })
+      .catch(() => { /* silently ignore — export history is non-critical */ });
+  }, [storyId]);
 
   const book = story?.generatedBook;
 
@@ -104,6 +141,56 @@ const BookPreview = () => {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       setActiveSection(id);
     }
+  };
+
+  /**
+   * Trigger a book export.
+   * If a cached export exists (done state), open the file URL directly.
+   * Otherwise call the API, show loading, then update state on completion.
+   */
+  const handleExport = async (formatKey) => {
+    // 'print' reuses the PDF export, then opens it for printing
+    const apiFormat = formatKey === 'print' ? 'pdf' : formatKey;
+    const current = exports[apiFormat];
+
+    // If already done (cached or fresh) — just open the file
+    if (current?.status === 'done' && current?.fileUrl) {
+      window.open(current.fileUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    // Mark as loading
+    setExports((prev) => ({ ...prev, [apiFormat]: { status: 'loading' } }));
+
+    try {
+      const res = await exportBook(storyId, apiFormat);
+      const data = res?.data?.export;
+      setExports((prev) => ({
+        ...prev,
+        [apiFormat]: {
+          status:    'done',
+          fileUrl:   data?.fileUrl,
+          fileSize:  data?.fileSize,
+          pageCount: data?.pageCount,
+          cached:    data?.cached
+        }
+      }));
+      // Auto-open the file
+      if (data?.fileUrl) {
+        window.open(data.fileUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      console.error(`Export failed (${apiFormat}):`, err);
+      setExports((prev) => ({ ...prev, [apiFormat]: { status: 'error' } }));
+    }
+  };
+
+  /** Format bytes as human-readable string */
+  const formatSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   if (loading) {
@@ -235,28 +322,86 @@ const BookPreview = () => {
                 </button>
               </div>
 
-              {/* Disabled Future Placeholders */}
+              {/* ── Export Panel ─────────────────────────────────────────── */}
               <div className="space-y-3 pt-4 border-t border-warm-gray/10">
-                <h4 className="text-xs font-semibold text-warm-gray uppercase tracking-widest">Future Features</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { icon: Sparkles, label: 'AI Rewrite' },
-                    { icon: BookMarked, label: 'Add Memory' },
-                    { icon: ImageIcon, label: 'New Cover' },
-                    { icon: Share2, label: 'Publish' },
-                    { icon: Printer, label: 'Print Book' },
-                    { icon: Download, label: 'PDF Book' }
-                  ].map(({ icon: Icon, label }) => (
-                    <button
-                      key={label}
-                      disabled
-                      className="flex flex-col items-center justify-center p-3 rounded-xl border border-warm-gray/10 bg-black/[0.01] text-warm-gray opacity-45 cursor-not-allowed hover:bg-transparent transition-colors text-center"
-                    >
-                      <Icon size={16} className="mb-1" />
-                      <span className="text-[10px] font-medium leading-tight">{label}</span>
-                    </button>
-                  ))}
+                <h4 className="text-xs font-semibold text-warm-gray uppercase tracking-widest">Export Book</h4>
+                <div className="space-y-2">
+                  {FORMAT_META.map(({ key, label, icon: Icon, ext, desc, isPrint }) => {
+                    const apiKey  = isPrint ? 'pdf' : key;
+                    const state   = exports[apiKey];
+                    const isLoading = state?.status === 'loading';
+                    const isDone    = state?.status === 'done';
+                    const isError   = state?.status === 'error';
+
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => handleExport(key)}
+                        disabled={isLoading}
+                        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl border transition-all text-left group ${
+                          isDone
+                            ? 'border-green-200 bg-green-50/60 text-deep-brown hover:bg-green-50'
+                            : isError
+                            ? 'border-red-200 bg-red-50/40 text-deep-brown hover:bg-red-50'
+                            : isLoading
+                            ? 'border-warm-gray/10 bg-soft-beige/30 cursor-wait opacity-70'
+                            : 'border-warm-gray/15 bg-white hover:bg-soft-beige/50 hover:border-warm-gray/25'
+                        }`}
+                      >
+                        {/* Icon area */}
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                          isDone    ? 'bg-green-100 text-green-600'
+                          : isError   ? 'bg-red-100 text-red-500'
+                          : isLoading ? 'bg-soft-beige text-warm-gray'
+                          : 'bg-soft-beige text-warm-gray group-hover:bg-dusty-rose/10 group-hover:text-dusty-rose'
+                        }`}>
+                          {isLoading ? (
+                            <Loader2 size={15} className="animate-spin" />
+                          ) : isDone ? (
+                            <CheckCircle2 size={15} />
+                          ) : isError ? (
+                            <AlertCircle size={15} />
+                          ) : (
+                            <Icon size={15} />
+                          )}
+                        </div>
+
+                        {/* Label & meta */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold leading-tight text-deep-brown truncate">
+                            {isLoading ? `Generating ${ext}…`
+                              : isDone    ? (state.cached ? `Download ${ext}` : `${ext} Ready`)
+                              : isError   ? `Retry ${ext}`
+                              : label}
+                          </p>
+                          <p className="text-[10px] text-warm-gray mt-0.5 leading-none">
+                            {isLoading ? 'Please wait…'
+                              : isDone && state.fileSize ? `${formatSize(state.fileSize)}${state.pageCount ? ` · ${state.pageCount} pages` : ''}`
+                              : isError   ? 'Generation failed'
+                              : desc}
+                          </p>
+                        </div>
+
+                        {/* Right caret */}
+                        {!isLoading && (
+                          <Download
+                            size={13}
+                            className={`shrink-0 opacity-40 group-hover:opacity-70 transition-opacity ${isDone ? 'text-green-500' : ''}`}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
+
+                {/* Share placeholder */}
+                <button
+                  disabled
+                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-warm-gray/10 text-warm-gray opacity-40 cursor-not-allowed text-xs font-medium"
+                >
+                  <Share2 size={13} />
+                  Share Book (Coming Soon)
+                </button>
               </div>
 
             </div>

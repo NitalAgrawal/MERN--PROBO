@@ -1,5 +1,6 @@
 const express = require('express');
 const { createStory, getStories, getStory, updateStory, deleteStory, generateBook } = require('../controllers/storyController');
+const { exportBook, getExportHistory } = require('../controllers/exportController');
 const { createStorySchema, updateStorySchema } = require('../validators/story.schema');
 const validate = require('../validators/validate');
 const { protect } = require('../middleware/auth');
@@ -27,5 +28,10 @@ router.route('/:id')
 
 // Trigger AI generation for a specific story
 router.post('/:id/generate', generateBook);
+
+// Export a book in a specific format (POST) / fetch export history (GET)
+// Uses :storyId to match the memory sub-router convention
+router.post('/:storyId/export', exportBook);
+router.get('/:storyId/exports', getExportHistory);
 
 module.exports = router;

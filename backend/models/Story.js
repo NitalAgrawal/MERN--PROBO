@@ -44,6 +44,22 @@ const generatedBookSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
+/**
+ * One completed (or failed) export run for a specific format.
+ * bookHash is SHA-256(generatedBook JSON) — used to detect whether
+ * the book content has changed since the last export, enabling cache reuse.
+ */
+const exportHistorySchema = new mongoose.Schema({
+  format:      { type: String, enum: ['pdf', 'epub', 'html'], required: true },
+  status:      { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
+  fileUrl:     { type: String },          // Cloudinary CDN URL
+  publicId:    { type: String },          // Cloudinary public_id for deletion
+  fileSize:    { type: Number },          // bytes
+  pageCount:   { type: Number },          // PDF/ePub page count
+  bookHash:    { type: String },          // SHA-256 of generatedBook at export time
+  generatedAt: { type: Date, default: Date.now }
+}, { _id: true });
+
 // Each element is one complete generation run — an immutable audit trail
 const generationHistorySchema = new mongoose.Schema({
   prompt:         { type: String },
@@ -106,6 +122,11 @@ const storySchema = new mongoose.Schema({
   // Immutable audit trail of every generation run — never overwritten
   generationHistory: {
     type: [generationHistorySchema],
+    default: []
+  },
+  // Export history — one entry per format, reused when bookHash matches
+  exportHistory: {
+    type: [exportHistorySchema],
     default: []
   }
 }, {
