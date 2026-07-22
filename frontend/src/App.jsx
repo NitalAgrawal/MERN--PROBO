@@ -15,6 +15,7 @@ import Workspace from './pages/Workspace/Workspace';
 import BookReveal from './pages/BookReveal/BookReveal';
 import BookPreview from './pages/BookPreview/BookPreview';
 import BookEditor from './pages/BookEditor/BookEditor';
+import CoverStudio from './pages/CoverStudio/CoverStudio';
 import NotFound from './pages/NotFound/NotFound';
 
 // Auth Pages
@@ -114,6 +115,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <BookEditor />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/cover-studio/:storyId" 
+            element={
+              <ProtectedRoute>
+                <CoverStudio />
               </ProtectedRoute>
             } 
           />

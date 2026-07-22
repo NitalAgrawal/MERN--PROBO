@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Pencil, BookOpen, Printer, Download,
-  Share2, Menu, X, ChevronRight, Eye,
+  Share2, Menu, X, ChevronRight, Eye, Sparkles,
   FileText, Book, Code, CheckCircle2, AlertCircle, Loader2
 } from 'lucide-react';
 import { getStory } from '../../services/storyService';
@@ -314,6 +314,13 @@ const BookPreview = () => {
               {/* Primary Actions */}
               <div className="pt-4 border-t border-warm-gray/10 space-y-2">
                 <button
+                  onClick={() => navigate(`/cover-studio/${story._id}`)}
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-dusty-rose to-rose-700 text-white py-2.5 rounded-full hover:shadow-md transition-all text-sm font-semibold"
+                >
+                  <Sparkles size={15} />
+                  AI Cover Studio
+                </button>
+                <button
                   onClick={() => navigate(`/book-editor/${story._id}`)}
                   className="w-full flex items-center justify-center gap-2 bg-deep-brown text-warm-ivory py-2.5 rounded-full hover:bg-deep-brown/90 transition-colors shadow-md text-sm font-medium"
                 >
@@ -444,9 +451,23 @@ const BookPreview = () => {
             <div className="text-center mt-8 relative z-10">
               <span className="text-[10px] uppercase tracking-[0.25em] text-warm-gray/60 font-semibold block mb-12">StoryNest Biography</span>
               
-              <div className={`w-40 h-40 rounded-full mx-auto mb-12 bg-gradient-to-br ${story.coverGradient} shadow-inner flex items-center justify-center relative`}>
-                <BookOpen size={48} className="text-deep-brown/15" strokeWidth={1} />
-                <div className="absolute inset-0 rounded-full bg-white/10 mix-blend-overlay" />
+              <div className={`w-44 h-44 rounded-2xl mx-auto mb-10 bg-gradient-to-br ${story.coverGradient} shadow-md flex items-center justify-center relative overflow-hidden group border border-warm-gray/10`}>
+                {(story.activeCover?.imageUrl || story.coverImage) ? (
+                  <img
+                    src={story.activeCover?.imageUrl || story.coverImage}
+                    alt="Active Cover Artwork"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <BookOpen size={48} className="text-deep-brown/15" strokeWidth={1} />
+                )}
+                <button
+                  onClick={() => navigate(`/cover-studio/${story._id}`)}
+                  className="absolute inset-0 bg-black/50 text-white font-semibold text-xs flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-xs"
+                >
+                  <Sparkles size={14} />
+                  Change Cover
+                </button>
               </div>
 
               <h1 className="font-serif text-3xl md:text-5xl font-bold leading-tight tracking-tight text-deep-brown mt-4 mb-4">

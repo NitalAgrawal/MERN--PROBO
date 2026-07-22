@@ -114,8 +114,15 @@ const EditorHeader = ({ story, onVersionHistoryOpen }) => {
 
         <div className="w-px h-4 bg-warm-gray/15 mx-1" />
 
-        {/* Disabled future features */}
-        <DisabledBtn icon={ImageIcon} label="New Cover" />
+        {/* Active — Cover Studio */}
+        <button
+          onClick={() => navigate(`/cover-studio/${story.id || story._id}`)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-dusty-rose font-semibold bg-dusty-rose/10 hover:bg-dusty-rose/20 text-xs transition-colors"
+        >
+          <ImageIcon size={14} />
+          <span>Cover Studio</span>
+        </button>
+
         <DisabledBtn icon={Share2} label="Publish" />
         <DisabledBtn icon={Printer} label="Print" />
         <DisabledBtn icon={Download} label="Export PDF" />

@@ -49,3 +49,32 @@ export const getExportHistory = async (storyId) => {
   const response = await api.get(`/stories/${storyId}/exports`);
   return response.data;
 };
+
+/**
+ * Trigger AI cover generation for a story.
+ * @param {string} storyId
+ * @param {Object} payload  { style, provider, customInstructions, forceRefresh }
+ */
+export const generateCover = async (storyId, payload) => {
+  const response = await api.post(`/stories/${storyId}/generate-cover`, payload);
+  return response.data;
+};
+
+/**
+ * Fetch all cover concepts and active cover for a story.
+ * @param {string} storyId
+ */
+export const getCovers = async (storyId) => {
+  const response = await api.get(`/stories/${storyId}/covers`);
+  return response.data;
+};
+
+/**
+ * Select active cover concept for a story.
+ * @param {string} storyId
+ * @param {string} coverId
+ */
+export const selectActiveCover = async (storyId, coverId) => {
+  const response = await api.patch(`/stories/${storyId}/covers/${coverId}/select`);
+  return response.data;
+};

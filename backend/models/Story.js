@@ -70,6 +70,18 @@ const generationHistorySchema = new mongoose.Schema({
   createdAt:      { type: Date, default: Date.now }
 }, { _id: false });
 
+// Each element is one generated cover concept in history
+const coverItemSchema = new mongoose.Schema({
+  id:           { type: String, required: true },
+  style:        { type: String, required: true },
+  prompt:       { type: String },
+  provider:     { type: String, default: 'openai' },
+  imageUrl:     { type: String, required: true },
+  thumbnailUrl: { type: String },
+  hash:         { type: String },
+  createdAt:    { type: Date, default: Date.now }
+}, { _id: true });
+
 const storySchema = new mongoose.Schema({
   owner: {
     type: mongoose.Schema.Types.ObjectId,
@@ -128,6 +140,16 @@ const storySchema = new mongoose.Schema({
   exportHistory: {
     type: [exportHistorySchema],
     default: []
+  },
+  // Cover history — generated artwork concepts
+  coverHistory: {
+    type: [coverItemSchema],
+    default: []
+  },
+  // Active cover concept currently chosen for the book
+  activeCover: {
+    type: coverItemSchema,
+    default: null
   }
 }, {
   timestamps: true

@@ -1,6 +1,7 @@
 const express = require('express');
 const { createStory, getStories, getStory, updateStory, deleteStory, generateBook } = require('../controllers/storyController');
 const { exportBook, getExportHistory } = require('../controllers/exportController');
+const { generateCover, getCovers, selectActiveCover } = require('../controllers/coverController');
 const { createStorySchema, updateStorySchema } = require('../validators/story.schema');
 const validate = require('../validators/validate');
 const { protect } = require('../middleware/auth');
@@ -33,5 +34,10 @@ router.post('/:id/generate', generateBook);
 // Uses :storyId to match the memory sub-router convention
 router.post('/:storyId/export', exportBook);
 router.get('/:storyId/exports', getExportHistory);
+
+// Cover Studio API Endpoints
+router.post('/:storyId/generate-cover', generateCover);
+router.get('/:storyId/covers', getCovers);
+router.patch('/:storyId/covers/:coverId/select', selectActiveCover);
 
 module.exports = router;
