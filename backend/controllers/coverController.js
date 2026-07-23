@@ -8,7 +8,19 @@ const coverService = require('../services/cover/coverService');
  * @route   POST /api/v1/stories/:storyId/generate-cover
  * @access  Private
  */
-const generateCover = async (req, res) => {
+const Story = require('../models/Story');
+const coverService = require('../services/cover/coverService');
+const logger = require('../services/logger/logger');
+const cacheService = require('../services/cache/cacheService');
+const metricsService = require('../services/metrics/metricsService');
+
+/**
+ * @desc    Generate AI cover concept for story
+ * @route   POST /api/v1/stories/:storyId/generate-cover
+ * @access  Private
+ */
+const generateCover = async (req, res, next) => {
+  const startTime = Date.now();
   try {
     const { storyId } = req.params;
     const { style, provider, customInstructions, forceRefresh } = req.body;
@@ -29,6 +41,12 @@ const generateCover = async (req, res) => {
       forceRefresh
     });
 
+    const duration = Date.now() - startTime;
+    metricsService.recordAIGeneration(duration);
+    logger.logAI('info', 'AI cover concept generated', { storyId, style, provider, duration, cached });
+
+    await cacheService.del(`cover_meta_${storyId}`);
+
     res.status(201).json({
       success: true,
       message: cached ? 'Reused cached cover generation concept.' : 'AI cover concept generated successfully.',
@@ -40,11 +58,8 @@ const generateCover = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error generating cover concept:', error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      message: error.message || 'Failed to generate AI cover concept.'
-    });
+    logger.error({ err: error.message, storyId: req.params.storyId }, 'Error generating cover concept');
+    next(error);
   }
 };
 
@@ -53,9 +68,18 @@ const generateCover = async (req, res) => {
  * @route   GET /api/v1/stories/:storyId/covers
  * @access  Private
  */
-const getCovers = async (req, res) => {
+const getCovers = async (req, res, next) => {
   try {
     const { storyId } = req.params;
+
+    const cacheKey = `cover_meta_${storyId}`;
+    const cachedData = await cacheService.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json({
+        success: true,
+        data: cachedData
+      });
+    }
 
     const story = await Story.findOne({ _id: storyId, owner: req.user._id });
 
@@ -67,21 +91,21 @@ const getCovers = async (req, res) => {
     }
 
     const coversData = coverService.getCovers(story);
+    const responseData = {
+      activeCover: coversData.activeCover,
+      coverHistory: coversData.coverHistory,
+      styles: coverService.getSupportedStyles()
+    };
+
+    await cacheService.set(cacheKey, responseData, 300);
 
     res.status(200).json({
       success: true,
-      data: {
-        activeCover: coversData.activeCover,
-        coverHistory: coversData.coverHistory,
-        styles: coverService.getSupportedStyles()
-      }
+      data: responseData
     });
   } catch (error) {
-    console.error('Error fetching covers:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch cover concepts.'
-    });
+    logger.error({ err: error.message, storyId: req.params.storyId }, 'Error fetching covers');
+    next(error);
   }
 };
 
@@ -90,7 +114,7 @@ const getCovers = async (req, res) => {
  * @route   PATCH /api/v1/stories/:storyId/covers/:coverId/select
  * @access  Private
  */
-const selectActiveCover = async (req, res) => {
+const selectActiveCover = async (req, res, next) => {
   try {
     const { storyId, coverId } = req.params;
 
@@ -104,6 +128,7 @@ const selectActiveCover = async (req, res) => {
     }
 
     const activeCover = await coverService.selectActiveCover(story, coverId);
+    await cacheService.del(`cover_meta_${storyId}`);
 
     res.status(200).json({
       success: true,
@@ -114,13 +139,11 @@ const selectActiveCover = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error selecting active cover:', error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      message: error.message || 'Failed to select active cover.'
-    });
+    logger.error({ err: error.message, storyId: req.params.storyId }, 'Error selecting active cover');
+    next(error);
   }
 };
+
 
 module.exports = {
   generateCover,

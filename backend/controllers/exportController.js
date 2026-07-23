@@ -15,17 +15,17 @@ const exportService = require('../services/export/exportService');
 const sendResponse  = require('../utils/sendResponse');
 const catchAsync    = require('../utils/catchAsync');
 const HTTP_STATUS   = require('../constants/httpStatus');
+const logger        = require('../services/logger/logger');
+const metricsService = require('../services/metrics/metricsService');
+const cacheService  = require('../services/cache/cacheService');
 
 /**
  * POST /api/v1/stories/:storyId/export
  *
  * Body: { format: "pdf" | "epub" | "html" }
- *
- * Returns the export record (cached or freshly generated).
- * If cached:   { cached: true,  fileUrl, fileSize, pageCount, generatedAt }
- * If new:      { cached: false, fileUrl, fileSize, pageCount, generatedAt }
  */
 const exportBook = catchAsync(async (req, res) => {
+  const startTime = Date.now();
   const { storyId } = req.params;
   const { format }  = req.body;
 
@@ -37,6 +37,17 @@ const exportBook = catchAsync(async (req, res) => {
   }
 
   const result = await exportService.exportBook(req.user._id, storyId, format.toLowerCase());
+  const duration = Date.now() - startTime;
+  metricsService.recordExport(duration);
+
+  logger.logExport('info', `Book export completed: ${format.toUpperCase()}`, {
+    storyId,
+    format,
+    durationMs: duration,
+    cached: result.cached,
+  });
+
+  await cacheService.del(`export_meta_${storyId}`);
 
   const message = result.cached
     ? `Returning cached ${format.toUpperCase()} export.`
@@ -47,14 +58,21 @@ const exportBook = catchAsync(async (req, res) => {
 
 /**
  * GET /api/v1/stories/:storyId/exports
- *
- * Returns the full export history for the story (newest first).
- * Internal fields (bookHash, publicId) are stripped by the service.
  */
 const getExportHistory = catchAsync(async (req, res) => {
   const { storyId } = req.params;
+
+  const cacheKey = `export_meta_${storyId}`;
+  const cachedHistory = await cacheService.get(cacheKey);
+  if (cachedHistory) {
+    return sendResponse(res, HTTP_STATUS.OK, 'Export history fetched successfully (cached).', { exports: cachedHistory });
+  }
+
   const history = await exportService.getExportHistory(req.user._id, storyId);
+  await cacheService.set(cacheKey, history, 120);
+
   sendResponse(res, HTTP_STATUS.OK, 'Export history fetched successfully.', { exports: history });
 });
 
 module.exports = { exportBook, getExportHistory };
+

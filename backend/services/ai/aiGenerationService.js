@@ -30,6 +30,8 @@ const Memory = require('../../models/Memory');
 const AppError = require('../../utils/AppError');
 const HTTP_STATUS = require('../../constants/httpStatus');
 const { buildBookPrompt } = require('../../prompts/memoirPrompt.v1');
+const logger = require('../logger/logger');
+const metricsService = require('../metrics/metricsService');
 
 // ── Provider registry ──────────────────────────────────────────────────────
 const PROVIDERS = {
@@ -66,7 +68,6 @@ const getProvider = () => {
  * @returns {object}
  */
 const parseBookJson = (text) => {
-  // Strip ```json ... ``` wrappers if the model added them anyway
   const cleaned = text
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/i, '')
@@ -101,8 +102,6 @@ const generateBook = async (userId, storyId) => {
     );
   }
 
-  // 2. ── 409 Conflict guard ─────────────────────────────────────────────
-  //    Never allow two generation runs to overlap on the same story.
   if (story.status === 'Generating') {
     throw new AppError(
       'Generation already in progress for this story.',
@@ -110,7 +109,6 @@ const generateBook = async (userId, storyId) => {
     );
   }
 
-  // 3. Load memories sorted by user-defined order
   const memories = await Memory.find({ storyId: story._id })
     .sort({ order: 1 })
     .lean();
@@ -122,15 +120,12 @@ const generateBook = async (userId, storyId) => {
     );
   }
 
-  // 4. Build the prompt from the versioned template (no hardcoded strings here)
   const { prompt, promptVersion } = buildBookPrompt(story, memories);
 
-  // 5. Mark as Generating so concurrent requests are rejected
   story.status = 'Generating';
   story.lastEdited = Date.now();
   await story.save();
 
-  // 6. Call the provider — wrapped so we can reset status on failure
   const provider = getProvider();
   const startTime = Date.now();
   let rawResponse;
@@ -138,23 +133,29 @@ const generateBook = async (userId, storyId) => {
   let providerName;
 
   try {
+    logger.logAI('info', 'Starting AI memoir book generation', { storyId, promptVersion });
     const result = await provider.complete(prompt);
     rawResponse  = result.text;
     modelUsed    = result.model;
     providerName = result.provider;
   } catch (providerError) {
-    // Reset status so the user can retry
     story.status = 'Collecting Memories';
     await story.save();
-    throw providerError; // propagate to global error handler
+    logger.logAI('error', 'AI memoir generation provider failure', { storyId, err: providerError.message });
+    throw providerError;
   }
 
-  const generationTime = Date.now() - startTime; // ms
+  const generationTime = Date.now() - startTime;
+  metricsService.recordAIGeneration(generationTime);
+  logger.logAI('info', 'AI memoir generation completed successfully', {
+    storyId,
+    providerName,
+    modelUsed,
+    generationTimeMs: generationTime
+  });
 
-  // 7. Parse the raw JSON response into a structured book
   const bookData = parseBookJson(rawResponse);
 
-  // 8. Persist generatedBook (replaces any previous version)
   story.generatedBook = {
     dedication:  bookData.dedication  ?? '',
     chapters:    bookData.chapters    ?? [],
@@ -169,8 +170,6 @@ const generateBook = async (userId, storyId) => {
     }
   };
 
-  // 9. Append an immutable audit entry to generationHistory
-  //    (separate from generatedBook — never overwritten, always appended)
   story.generationHistory.push({
     prompt,
     rawResponse,
@@ -180,7 +179,6 @@ const generateBook = async (userId, storyId) => {
     createdAt:      new Date()
   });
 
-  // 10. Mark as Ready and persist
   story.status = 'Ready';
   story.lastEdited = Date.now();
   await story.save();
@@ -189,3 +187,4 @@ const generateBook = async (userId, storyId) => {
 };
 
 module.exports = { generateBook };
+

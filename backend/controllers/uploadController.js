@@ -3,6 +3,7 @@
 const Memory = require('../models/Memory');
 const Story = require('../models/Story');
 const mediaService = require('../services/mediaService');
+const metricsService = require('../services/metrics/metricsService');
 const AppError = require('../utils/AppError');
 const HTTP_STATUS = require('../constants/httpStatus');
 const catchAsync = require('../utils/catchAsync');
@@ -34,6 +35,7 @@ const verifyMemoryOwnership = async (memoryId, userId) => {
  * Upload an image file for a memory.
  */
 const uploadImage = catchAsync(async (req, res) => {
+  const startTime = Date.now();
   const { memoryId, caption } = req.body;
   if (!req.file) {
     throw new AppError('No file uploaded.', HTTP_STATUS.BAD_REQUEST);
@@ -44,6 +46,8 @@ const uploadImage = catchAsync(async (req, res) => {
 
   // 2. Upload to Cloudinary
   const uploadResult = await mediaService.uploadImage(req.file.buffer);
+  const duration = Date.now() - startTime;
+  metricsService.recordUpload(duration);
 
   // 3. Construct structured object
   const photoDoc = {
@@ -70,6 +74,7 @@ const uploadImage = catchAsync(async (req, res) => {
  * Upload a voice note file for a memory.
  */
 const uploadVoice = catchAsync(async (req, res) => {
+  const startTime = Date.now();
   const { memoryId } = req.body;
   if (!req.file) {
     throw new AppError('No file uploaded.', HTTP_STATUS.BAD_REQUEST);
@@ -80,6 +85,8 @@ const uploadVoice = catchAsync(async (req, res) => {
 
   // 2. Upload to Cloudinary
   const uploadResult = await mediaService.uploadVoiceNote(req.file.buffer);
+  const duration = Date.now() - startTime;
+  metricsService.recordUpload(duration);
 
   // 3. Construct structured object
   const voiceNoteDoc = {
@@ -98,6 +105,7 @@ const uploadVoice = catchAsync(async (req, res) => {
     voiceNote: memory.voiceNotes[memory.voiceNotes.length - 1]
   });
 });
+
 
 /**
  * Delete a photo by database photoId. Resolves Cloudinary publicId internally.

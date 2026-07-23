@@ -2,6 +2,7 @@
 
 const BaseImageProvider = require('./provider');
 const FallbackImageProvider = require('./fallbackImageProvider');
+const logger = require('../../../services/logger/logger');
 
 class StabilityImageProvider extends BaseImageProvider {
   constructor() {
@@ -40,7 +41,7 @@ class StabilityImageProvider extends BaseImageProvider {
       });
 
       if (!response.ok) {
-        console.warn(`Stability API error (${response.status})`);
+        logger.warn({ provider: 'stability', status: response.status }, `Stability API error (${response.status})`);
         return this.fallback.generateImage(prompt, options);
       }
 
@@ -60,7 +61,7 @@ class StabilityImageProvider extends BaseImageProvider {
         model: 'sdxl-1.0'
       };
     } catch (err) {
-      console.error('Stability AI request failed:', err.message);
+      logger.error({ provider: 'stability', err: err.message }, 'Stability AI request failed');
       return this.fallback.generateImage(prompt, options);
     }
   }

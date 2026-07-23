@@ -1,0 +1,851 @@
+openapi: "3.0.3"
+info:
+  title: StoryNest API
+  description: |
+    RESTful API powering StoryNest — the AI-powered memoir creation platform.
+
+    **Features:**
+    - JWT authentication via HTTP-only cookies
+    - Story & memory CRUD
+    - AI memoir book generation
+    - AI cover generation
+    - Rich media uploads (Cloudinary)
+    - PDF, EPUB, HTML export engine
+
+    **Authentication:**
+    All protected routes require a valid `accessToken` HTTP-only cookie obtained from `POST /api/v1/auth/login`.
+
+    **Request IDs:**
+    Every request and response carries an `x-request-id` header for log correlation.
+
+  version: "1.0.0"
+  contact:
+    name: StoryNest Engineering
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Local Development
+  - url: https://storynest.example.com/api/v1
+    description: Production
+
+tags:
+  - name: Health
+    description: Server health and readiness checks
+  - name: Auth
+    description: User registration, login, and session management
+  - name: Stories
+    description: Story CRUD operations
+  - name: Memories
+    description: Memory CRUD operations nested under stories
+  - name: AI Generation
+    description: AI memoir book generation
+  - name: Cover Studio
+    description: AI-powered cover generation and management
+  - name: Exports
+    description: PDF, EPUB, and HTML book export
+  - name: Uploads
+    description: Media upload and management
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: accessToken
+
+  schemas:
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+        requestId:
+          type: string
+          format: uuid
+
+    UserObject:
+      type: object
+      properties:
+        _id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time
+
+    StoryObject:
+      type: object
+      properties:
+        _id:
+          type: string
+        title:
+          type: string
+        subject:
+          type: string
+        relationship:
+          type: string
+        status:
+          type: string
+          enum: [Draft, Collecting Memories, Generating, Ready, Published]
+        progress:
+          type: integer
+        owner:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    MemoryObject:
+      type: object
+      properties:
+        _id:
+          type: string
+        storyId:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        order:
+          type: integer
+        photos:
+          type: array
+          items:
+            type: object
+        voiceNotes:
+          type: array
+          items:
+            type: object
+
+    ExportObject:
+      type: object
+      properties:
+        format:
+          type: string
+          enum: [pdf, epub, html]
+        fileUrl:
+          type: string
+          format: uri
+        fileSize:
+          type: integer
+        pageCount:
+          type: integer
+        cached:
+          type: boolean
+        generatedAt:
+          type: string
+          format: date-time
+
+  responses:
+    Unauthorized:
+      description: Authentication required or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    BadRequest:
+      description: Invalid request body or parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+paths:
+  # ── Health ────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Health]
+      summary: Get server health status
+      description: Returns MongoDB, Cloudinary, AI provider status, uptime, memory, and performance metrics
+      operationId: getHealth
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      mongoDB:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            enum: [connected, disconnected, connecting]
+                      cloudinary:
+                        type: object
+                      aiProvider:
+                        type: object
+                      serverUptimeSeconds:
+                        type: integer
+                      memoryUsage:
+                        type: object
+                      nodeVersion:
+                        type: string
+                      performanceMetrics:
+                        type: object
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Kubernetes/Docker readiness probe
+      description: Returns 200 if the server is ready for production traffic, 503 if not
+      operationId: getReadiness
+      responses:
+        "200":
+          description: Server is ready
+          content:
+            application/json:
+              schema:
+                type: object
+        "503":
+          description: Service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ── Auth ──────────────────────────────────────────────────────────────────
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  type: string
+                  minLength: 2
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        "201":
+          description: User registered
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "409":
+          description: Email already in use
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and receive auth cookies
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Login successful, sets HTTP-only accessToken cookie
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout and clear auth cookies
+      operationId: logout
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Logged out
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get authenticated user profile
+      operationId: getMe
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/UserObject'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request password reset
+      operationId: forgotPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: Password reset email sent
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ── Stories ───────────────────────────────────────────────────────────────
+  /stories:
+    get:
+      tags: [Stories]
+      summary: List all stories for the current user
+      operationId: getStories
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: List of stories
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Stories]
+      summary: Create a new story
+      operationId: createStory
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, subject, relationship]
+              properties:
+                title:
+                  type: string
+                subject:
+                  type: string
+                relationship:
+                  type: string
+      responses:
+        "201":
+          description: Story created
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /stories/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Stories]
+      summary: Get a story by ID
+      operationId: getStory
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Story object
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags: [Stories]
+      summary: Update a story
+      operationId: updateStory
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Story updated
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Stories]
+      summary: Delete a story and all its data
+      operationId: deleteStory
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Story deleted
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /stories/{id}/generate:
+    post:
+      tags: [AI Generation]
+      summary: Generate AI memoir book for a story
+      description: "Rate limited: 10 requests per 5 minutes"
+      operationId: generateBook
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Book generated
+        "400":
+          description: No memories to generate from
+        "409":
+          description: Generation already in progress
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ── Memories ──────────────────────────────────────────────────────────────
+  /stories/{storyId}/memories:
+    parameters:
+      - name: storyId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Memories]
+      summary: List all memories for a story
+      operationId: getMemories
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: List of memories
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Memories]
+      summary: Create a new memory
+      operationId: createMemory
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                content:
+                  type: string
+                date:
+                  type: string
+                  format: date
+                location:
+                  type: string
+      responses:
+        "201":
+          description: Memory created
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /memories/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Memories]
+      summary: Get a single memory by ID
+      operationId: getMemory
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Memory object
+        "404":
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Memories]
+      summary: Update a memory
+      operationId: updateMemory
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Memory updated
+        "404":
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Memories]
+      summary: Delete a memory
+      operationId: deleteMemory
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Memory deleted
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ── Exports ───────────────────────────────────────────────────────────────
+  /stories/{storyId}/export:
+    post:
+      tags: [Exports]
+      summary: Export a story as PDF, EPUB, or HTML
+      description: "Rate limited: 10 requests per 10 minutes"
+      operationId: exportBook
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: storyId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [format]
+              properties:
+                format:
+                  type: string
+                  enum: [pdf, epub, html]
+      responses:
+        "200":
+          description: Export complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      export:
+                        $ref: '#/components/schemas/ExportObject'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+
+  /stories/{storyId}/exports:
+    get:
+      tags: [Exports]
+      summary: Get export history for a story
+      operationId: getExportHistory
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: storyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Export history
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Cover Studio ──────────────────────────────────────────────────────────
+  /stories/{storyId}/generate-cover:
+    post:
+      tags: [Cover Studio]
+      summary: Generate an AI cover for a story
+      description: "Rate limited: 10 requests per 5 minutes"
+      operationId: generateCover
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: storyId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                style:
+                  type: string
+                provider:
+                  type: string
+                customInstructions:
+                  type: string
+                forceRefresh:
+                  type: boolean
+      responses:
+        "201":
+          description: Cover concept generated
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+
+  /stories/{storyId}/covers:
+    get:
+      tags: [Cover Studio]
+      summary: Get all cover concepts for a story
+      operationId: getCovers
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: storyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Cover concepts and supported styles
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /stories/{storyId}/covers/{coverId}/select:
+    patch:
+      tags: [Cover Studio]
+      summary: Select the active cover for a story
+      operationId: selectActiveCover
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: storyId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: coverId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Active cover updated
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Uploads ───────────────────────────────────────────────────────────────
+  /uploads/image:
+    post:
+      tags: [Uploads]
+      summary: Upload an image to a memory
+      description: "Rate limited: 20 requests per 10 minutes. Max file size: 10MB"
+      operationId: uploadImage
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, memoryId]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                memoryId:
+                  type: string
+                caption:
+                  type: string
+      responses:
+        "200":
+          description: Image uploaded
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+
+  /uploads/voice:
+    post:
+      tags: [Uploads]
+      summary: Upload a voice note to a memory
+      description: "Rate limited: 20 requests per 10 minutes"
+      operationId: uploadVoice
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, memoryId]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                memoryId:
+                  type: string
+      responses:
+        "200":
+          description: Voice note uploaded
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+
+  /uploads/photo:
+    delete:
+      tags: [Uploads]
+      summary: Delete a photo from a memory
+      operationId: deletePhoto
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [memoryId, photoId]
+              properties:
+                memoryId:
+                  type: string
+                photoId:
+                  type: string
+      responses:
+        "200":
+          description: Photo deleted
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /uploads/voice-note:
+    delete:
+      tags: [Uploads]
+      summary: Delete a voice note from a memory
+      operationId: deleteVoice
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [memoryId, voiceId]
+              properties:
+                memoryId:
+                  type: string
+                voiceId:
+                  type: string
+      responses:
+        "200":
+          description: Voice note deleted
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "401":
+          $ref: '#/components/responses/Unauthorized'

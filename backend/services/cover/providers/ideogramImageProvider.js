@@ -2,6 +2,7 @@
 
 const BaseImageProvider = require('./provider');
 const FallbackImageProvider = require('./fallbackImageProvider');
+const logger = require('../../../services/logger/logger');
 
 class IdeogramImageProvider extends BaseImageProvider {
   constructor() {
@@ -39,7 +40,7 @@ class IdeogramImageProvider extends BaseImageProvider {
       });
 
       if (!response.ok) {
-        console.warn(`Ideogram API error (${response.status})`);
+        logger.warn({ provider: 'ideogram', status: response.status }, `Ideogram API error (${response.status})`);
         return this.fallback.generateImage(prompt, options);
       }
 
@@ -57,7 +58,7 @@ class IdeogramImageProvider extends BaseImageProvider {
         model: 'v2'
       };
     } catch (err) {
-      console.error('Ideogram API request failed:', err.message);
+      logger.error({ provider: 'ideogram', err: err.message }, 'Ideogram API request failed');
       return this.fallback.generateImage(prompt, options);
     }
   }

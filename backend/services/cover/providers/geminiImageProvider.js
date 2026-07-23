@@ -2,6 +2,7 @@
 
 const BaseImageProvider = require('./provider');
 const FallbackImageProvider = require('./fallbackImageProvider');
+const logger = require('../../../services/logger/logger');
 
 class GeminiImageProvider extends BaseImageProvider {
   constructor() {
@@ -36,7 +37,7 @@ class GeminiImageProvider extends BaseImageProvider {
       });
 
       if (!response.ok) {
-        console.warn(`Gemini Imagen API error (${response.status})`);
+        logger.warn({ provider: 'gemini', status: response.status }, `Gemini Imagen API error (${response.status})`);
         return this.fallback.generateImage(prompt, options);
       }
 
@@ -56,7 +57,7 @@ class GeminiImageProvider extends BaseImageProvider {
         model: 'imagen-3.0'
       };
     } catch (err) {
-      console.error('Gemini Imagen request failed:', err.message);
+      logger.error({ provider: 'gemini', err: err.message }, 'Gemini Imagen request failed');
       return this.fallback.generateImage(prompt, options);
     }
   }

@@ -5,6 +5,7 @@ const { generateCover, getCovers, selectActiveCover } = require('../controllers/
 const { createStorySchema, updateStorySchema } = require('../validators/story.schema');
 const validate = require('../validators/validate');
 const { protect } = require('../middleware/auth');
+const { aiLimiter, exportLimiter } = require('../middleware/rateLimiter');
 
 // Import memory router to nest it under stories
 const memoryRoutes = require('./memoryRoutes');
@@ -27,17 +28,17 @@ router.route('/:id')
   .patch(validate(updateStorySchema), updateStory)
   .delete(deleteStory);
 
-// Trigger AI generation for a specific story
-router.post('/:id/generate', generateBook);
+// Trigger AI generation for a specific story (rate limited)
+router.post('/:id/generate', aiLimiter, generateBook);
 
 // Export a book in a specific format (POST) / fetch export history (GET)
-// Uses :storyId to match the memory sub-router convention
-router.post('/:storyId/export', exportBook);
+router.post('/:storyId/export', exportLimiter, exportBook);
 router.get('/:storyId/exports', getExportHistory);
 
-// Cover Studio API Endpoints
-router.post('/:storyId/generate-cover', generateCover);
+// Cover Studio API Endpoints (AI generation is rate limited)
+router.post('/:storyId/generate-cover', aiLimiter, generateCover);
 router.get('/:storyId/covers', getCovers);
 router.patch('/:storyId/covers/:coverId/select', selectActiveCover);
 
 module.exports = router;
+

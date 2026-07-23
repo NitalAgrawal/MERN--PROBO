@@ -3,6 +3,8 @@ const Story = require('../models/Story');
 const AppError = require('../utils/AppError');
 const HTTP_STATUS = require('../constants/httpStatus');
 const mediaService = require('./mediaService');
+const logger = require('./logger/logger');
+const cacheService = require('./cache/cacheService');
 
 /**
  * Helper to verify story ownership.
@@ -21,7 +23,6 @@ const verifyStoryOwnership = async (storyId, userId) => {
 const createMemory = async (userId, storyId, data) => {
   const story = await verifyStoryOwnership(storyId, userId);
 
-  // Find the highest current order for this story's memories
   const lastMemory = await Memory.findOne({ storyId }).sort({ order: -1 });
   const newOrder = lastMemory ? lastMemory.order + 1 : 0;
 
@@ -31,9 +32,11 @@ const createMemory = async (userId, storyId, data) => {
     ...data
   });
 
-  // Update lastEdited on the parent story
   story.lastEdited = Date.now();
   await story.save();
+
+  await cacheService.del(`story_meta_${storyId}`);
+  await cacheService.del(`user_stories_${userId}`);
 
   return memory;
 };
@@ -57,15 +60,15 @@ const updateMemory = async (userId, memoryId, data) => {
 
   const story = await verifyStoryOwnership(memory.storyId, userId);
 
-  // Update fields
   Object.keys(data).forEach(key => {
     memory[key] = data[key];
   });
   await memory.save();
 
-  // Update lastEdited on parent story
   story.lastEdited = Date.now();
   await story.save();
+
+  await cacheService.del(`story_meta_${memory.storyId}`);
 
   return memory;
 };
@@ -81,14 +84,13 @@ const deleteMemory = async (userId, memoryId) => {
 
   const story = await verifyStoryOwnership(memory.storyId, userId);
 
-  // Clean up associated Cloudinary assets before deleting document
   if (memory.photos && memory.photos.length > 0) {
     for (const photo of memory.photos) {
       if (photo.publicId) {
         try {
           await mediaService.deleteAsset(photo.publicId, 'image');
         } catch (cloudinaryErr) {
-          console.error(`Failed to delete photo ${photo.publicId} from Cloudinary during memory delete:`, cloudinaryErr);
+          logger.error({ err: cloudinaryErr.message, publicId: photo.publicId }, 'Failed to delete photo from Cloudinary during memory delete');
         }
       }
     }
@@ -100,7 +102,7 @@ const deleteMemory = async (userId, memoryId) => {
         try {
           await mediaService.deleteAsset(voice.publicId, 'video');
         } catch (cloudinaryErr) {
-          console.error(`Failed to delete voice note ${voice.publicId} from Cloudinary during memory delete:`, cloudinaryErr);
+          logger.error({ err: cloudinaryErr.message, publicId: voice.publicId }, 'Failed to delete voice note from Cloudinary during memory delete');
         }
       }
     }
@@ -108,12 +110,15 @@ const deleteMemory = async (userId, memoryId) => {
 
   await Memory.deleteOne({ _id: memoryId });
 
-  // Update lastEdited on parent story
   story.lastEdited = Date.now();
   await story.save();
 
+  await cacheService.del(`story_meta_${memory.storyId}`);
+  await cacheService.del(`user_stories_${userId}`);
+
   return { id: memoryId };
 };
+
 
 /**
  * Bulk reorder memories in one request.

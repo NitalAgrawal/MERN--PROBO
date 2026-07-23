@@ -3,13 +3,11 @@ const Memory = require('../models/Memory');
 const AppError = require('../utils/AppError');
 const HTTP_STATUS = require('../constants/httpStatus');
 const mediaService = require('./mediaService');
+const logger = require('./logger/logger');
+const cacheService = require('./cache/cacheService');
 
 /**
  * Calculates the story progress dynamically based on status and memory count.
- *
- * @param {string} status
- * @param {number} memoryCount
- * @returns {number}
  */
 const calculateProgress = (status, memoryCount) => {
   if (status === 'Draft') return 10;
@@ -40,26 +38,42 @@ const createStory = async (userId, data) => {
     owner: userId,
     ...data
   });
-  return injectProgress(story);
+  const result = await injectProgress(story);
+  await cacheService.del(`user_stories_${userId}`);
+  return result;
 };
 
 /**
  * Get all stories for a user.
  */
 const getUserStories = async (userId) => {
+  const cacheKey = `user_stories_${userId}`;
+  const cached = await cacheService.get(cacheKey);
+  if (cached) return cached;
+
   const stories = await Story.find({ owner: userId }).sort({ updatedAt: -1 });
-  return Promise.all(stories.map(story => injectProgress(story)));
+  const result = await Promise.all(stories.map(story => injectProgress(story)));
+  await cacheService.set(cacheKey, result, 60);
+  return result;
 };
 
 /**
  * Get a story by ID, checking ownership.
  */
 const getStoryById = async (userId, storyId) => {
+  const cacheKey = `story_meta_${storyId}`;
+  const cached = await cacheService.get(cacheKey);
+  if (cached && String(cached.owner) === String(userId)) {
+    return cached;
+  }
+
   const story = await Story.findOne({ _id: storyId, owner: userId });
   if (!story) {
     throw new AppError('Story not found or you do not have access.', HTTP_STATUS.NOT_FOUND);
   }
-  return injectProgress(story);
+  const result = await injectProgress(story);
+  await cacheService.set(cacheKey, result, 120);
+  return result;
 };
 
 /**
@@ -71,14 +85,16 @@ const updateStory = async (userId, storyId, data) => {
     throw new AppError('Story not found or you do not have access.', HTTP_STATUS.NOT_FOUND);
   }
 
-  // Update allowed fields
   Object.keys(data).forEach(key => {
     story[key] = data[key];
   });
   story.lastEdited = Date.now();
   await story.save();
 
-  return injectProgress(story);
+  const result = await injectProgress(story);
+  await cacheService.del(`story_meta_${storyId}`);
+  await cacheService.del(`user_stories_${userId}`);
+  return result;
 };
 
 /**
@@ -90,7 +106,6 @@ const deleteStory = async (userId, storyId) => {
     throw new AppError('Story not found or you do not have access.', HTTP_STATUS.NOT_FOUND);
   }
 
-  // Find all memories first to clean up associated Cloudinary files
   const memories = await Memory.find({ storyId });
   for (const memory of memories) {
     if (memory.photos && memory.photos.length > 0) {
@@ -99,7 +114,7 @@ const deleteStory = async (userId, storyId) => {
           try {
             await mediaService.deleteAsset(photo.publicId, 'image');
           } catch (err) {
-            console.error(`Failed to delete photo ${photo.publicId} during story delete:`, err);
+            logger.error({ err: err.message, publicId: photo.publicId }, `Failed to delete photo during story delete`);
           }
         }
       }
@@ -110,7 +125,7 @@ const deleteStory = async (userId, storyId) => {
           try {
             await mediaService.deleteAsset(voice.publicId, 'video');
           } catch (err) {
-            console.error(`Failed to delete voice note ${voice.publicId} during story delete:`, err);
+            logger.error({ err: err.message, publicId: voice.publicId }, `Failed to delete voice note during story delete`);
           }
         }
       }
@@ -120,8 +135,12 @@ const deleteStory = async (userId, storyId) => {
   await Story.deleteOne({ _id: storyId });
   await Memory.deleteMany({ storyId });
 
+  await cacheService.del(`story_meta_${storyId}`);
+  await cacheService.del(`user_stories_${userId}`);
+
   return { id: storyId };
 };
+
 
 module.exports = {
   createStory,

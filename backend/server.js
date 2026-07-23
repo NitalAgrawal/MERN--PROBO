@@ -1,71 +1,137 @@
-const express = require('express');
-const cors = require('cors');
-const cookieParser = require('cookie-parser');
-const morgan = require('morgan');
-const dotenv = require('dotenv');
-
-const connectDB = require('./config/db');
-const authRoutes = require('./routes/authRoutes');
-const storyRoutes = require('./routes/storyRoutes');
-const memoryRoutes = require('./routes/memoryRoutes');
-const uploadRoutes = require('./routes/uploadRoutes');
-const { configureCloudinary } = require('./config/cloudinary');
-const notFound = require('./middleware/notFound');
-const errorHandler = require('./middleware/errorHandler');
-const HTTP_STATUS = require('./constants/httpStatus');
-
-// Load environment variables
+const dotenv    = require('dotenv');
 dotenv.config();
 
-// Connect to database
-connectDB();
+const express      = require('express');
+const cors         = require('cors');
+const helmet       = require('helmet');
+const compression  = require('compression');
+const cookieParser = require('cookie-parser');
+const hpp          = require('hpp');
+const mongoSanitize = require('express-mongo-sanitize');
+const swaggerUi    = require('swagger-ui-express');
+const YAML         = require('yamljs');
+const path         = require('path');
 
-// Initialize Cloudinary SDK
+const validateEnv         = require('./config/envValidation');
+const connectDB           = require('./config/db');
+const { configureCloudinary } = require('./config/cloudinary');
+const logger              = require('./services/logger/logger');
+const httpLogger          = require('./middleware/httpLogger');
+const requestId           = require('./middleware/requestId');
+const errorLogger         = require('./middleware/errorLogger');
+const errorHandler        = require('./middleware/errorHandler');
+const notFound            = require('./middleware/notFound');
+const { authLimiter, aiLimiter, uploadLimiter, exportLimiter } = require('./middleware/rateLimiter');
+
+const authRoutes    = require('./routes/authRoutes');
+const storyRoutes   = require('./routes/storyRoutes');
+const memoryRoutes  = require('./routes/memoryRoutes');
+const uploadRoutes  = require('./routes/uploadRoutes');
+const healthRoutes  = require('./routes/healthRoutes');
+
+// ── Startup: Environment validation ───────────────────────────────────────
+validateEnv();
+
+// ── Database & Cloud Services ─────────────────────────────────────────────
+connectDB();
 configureCloudinary();
 
-const app = express();
+const app  = express();
 const PORT = process.env.PORT || 5000;
 
-// Logging Middleware (development only, using custom token/format)
-if (process.env.NODE_ENV === 'development') {
-  app.use(morgan(':method :url :status :response-time ms'));
-}
-
-// CORS configuration (no wildcards, explicit origin from CLIENT_URL, with credentials)
+// ── Security Headers (Helmet) ─────────────────────────────────────────────
 app.use(
-  cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
-    credentials: true,
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc:   ["'self'", "'unsafe-inline'"],
+        imgSrc:     ["'self'", 'data:', 'https://res.cloudinary.com'],
+        scriptSrc:  ["'self'"],
+        connectSrc: ["'self'"],
+        fontSrc:    ["'self'"],
+      },
+    },
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+    referrerPolicy: { policy: 'no-referrer' },
   })
 );
 
-// Body Parsers & Cookie Parser
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
+// ── Response Compression ──────────────────────────────────────────────────
+app.use(compression());
 
-// Public Health Check Endpoint (Versioned, no auth, no rate limit)
-app.get('/api/v1/health', (req, res) => {
-  res.status(HTTP_STATUS.OK).json({
-    success: true,
-    message: 'StoryNest API is running.',
-  });
-});
+// ── CORS Hardening ─────────────────────────────────────────────────────────
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      const allowed = process.env.CLIENT_URL || 'http://localhost:5173';
+      if (!origin || allowed.split(',').map(o => o.trim()).includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials:     true,
+    methods:         ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders:  ['Content-Type', 'Authorization', 'x-request-id'],
+    exposedHeaders:  ['x-request-id'],
+    maxAge:          86400,
+  })
+);
 
-// API Routes
-app.use('/api/v1/auth', authRoutes);
+// ── Request ID (must come early for log correlation) ─────────────────────
+app.use(requestId);
+
+// ── Structured HTTP Logging ───────────────────────────────────────────────
+app.use(httpLogger);
+
+// ── Body Parsers with size limits ─────────────────────────────────────────
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+app.use(cookieParser(process.env.COOKIE_SECRET || process.env.JWT_SECRET));
+
+// ── Security: NoSQL injection & HTTP pollution prevention ────────────────
+app.use(mongoSanitize({ replaceWith: '_' }));
+app.use(hpp());
+
+// ── Swagger / OpenAPI Documentation ──────────────────────────────────────
+try {
+  const swaggerDoc = YAML.load(path.join(__dirname, 'docs', 'openapi.yaml'));
+  app.use(
+    '/api/docs',
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerDoc, {
+      customSiteTitle: 'StoryNest API Docs',
+      customCss: '.swagger-ui .topbar { display: none }',
+    })
+  );
+  logger.info('📚 Swagger UI available at /api/docs');
+} catch (err) {
+  logger.warn({ err: err.message }, 'Swagger YAML not found — /api/docs unavailable');
+}
+
+// ── Health & Readiness Endpoints (no auth, no rate limit) ────────────────
+app.use('/api/v1', healthRoutes);
+
+// ── Versioned API Routes with specific rate limiters ─────────────────────
+app.use('/api/v1/auth',    authLimiter,   authRoutes);
 app.use('/api/v1/stories', storyRoutes);
 app.use('/api/v1/memories', memoryRoutes);
-app.use('/api/v1/uploads', uploadRoutes);
+app.use('/api/v1/uploads', uploadLimiter, uploadRoutes);
 
-// Global 404 Route Handler
+// ── 404 Handler ───────────────────────────────────────────────────────────
 app.use(notFound);
 
-// Global Error Handler
+// ── Central Error Logger → Global Error Handler (order matters) ───────────
+app.use(errorLogger);
 app.use(errorHandler);
 
+// ── Start Server ──────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`🚀 Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+  logger.info(
+    { port: PORT, env: process.env.NODE_ENV || 'development' },
+    `🚀 StoryNest API running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`
+  );
 });
 
 module.exports = app;

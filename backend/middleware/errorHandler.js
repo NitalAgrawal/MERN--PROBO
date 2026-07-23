@@ -1,4 +1,5 @@
 const HTTP_STATUS = require('../constants/httpStatus');
+const logger = require('../services/logger/logger');
 
 /**
  * Global Express error handler — must be the LAST middleware in server.js.
@@ -6,15 +7,6 @@ const HTTP_STATUS = require('../constants/httpStatus');
  * Handles all operational and unexpected errors and always returns the
  * standardized error shape:
  *   { success: false, message: "..." }
- *
- * Error types handled:
- *  - AppError (operational)        → use its statusCode + message
- *  - Mongoose CastError            → 404 "Resource not found."
- *  - Mongoose duplicate key 11000  → 409 "Email already in use."
- *  - Mongoose ValidationError      → 400 first validation message
- *  - JsonWebTokenError             → 401 "Invalid token."
- *  - TokenExpiredError             → 401 "Token expired."
- *  - Everything else               → 500 (generic, no leak of internals)
  */
 const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused-vars
   let statusCode = err.statusCode || HTTP_STATUS.INTERNAL_SERVER_ERROR;
@@ -50,15 +42,17 @@ const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused
     message    = 'Your session has expired. Please log in again.';
   }
 
-  // ── In development: log stack trace for non-operational errors ───────────
-  if (process.env.NODE_ENV === 'development' && !err.isOperational) {
-    console.error('💥 Unexpected error:', err);
+  // Sanitized message in production for 500 errors
+  if (statusCode === HTTP_STATUS.INTERNAL_SERVER_ERROR && process.env.NODE_ENV === 'production') {
+    message = 'An unexpected internal server error occurred.';
   }
 
   res.status(statusCode).json({
     success: false,
     message,
+    requestId: req.id || req.requestId || undefined,
   });
 };
 
 module.exports = errorHandler;
+

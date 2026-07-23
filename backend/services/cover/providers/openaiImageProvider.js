@@ -2,6 +2,7 @@
 
 const BaseImageProvider = require('./provider');
 const FallbackImageProvider = require('./fallbackImageProvider');
+const logger = require('../../../services/logger/logger');
 
 class OpenAIImageProvider extends BaseImageProvider {
   constructor() {
@@ -40,7 +41,7 @@ class OpenAIImageProvider extends BaseImageProvider {
 
       if (!response.ok) {
         const errorJson = await response.json().catch(() => ({}));
-        console.warn(`OpenAI image generation API error (${response.status}):`, errorJson);
+        logger.warn({ provider: 'openai', status: response.status, errorJson }, `OpenAI image generation API error (${response.status})`);
         return this.fallback.generateImage(prompt, options);
       }
 
@@ -58,7 +59,7 @@ class OpenAIImageProvider extends BaseImageProvider {
         model: 'dall-e-3'
       };
     } catch (err) {
-      console.error('OpenAI image generation request failed:', err.message);
+      logger.error({ provider: 'openai', err: err.message }, 'OpenAI image generation request failed');
       return this.fallback.generateImage(prompt, options);
     }
   }
